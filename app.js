@@ -150,6 +150,21 @@ $('signin').onclick = async () => {
 }
 $('signout').onclick = () => sb.auth.signOut()
 
+// Supabase reports OAuth failures by redirecting back here with the reason in
+// the query string and the hash. Without this the page just re-renders the login
+// screen and the failure looks like a no-op. Query first: the hash copy is
+// double-encoded.
+{
+  const q = new URLSearchParams(location.search)
+  const h = new URLSearchParams(location.hash.slice(1))
+  const err = q.get('error_description') ?? h.get('error_description')
+  if (err) {
+    $('login-err').textContent = err
+    $('login-err').hidden = false
+    history.replaceState(null, '', location.pathname)  // don't re-show on reload
+  }
+}
+
 sb.auth.onAuthStateChange(async (_e, session) => {
   const on = !!session
   $('login').hidden = on
