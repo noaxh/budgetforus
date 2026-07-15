@@ -250,6 +250,36 @@ Everything else is secondary.
 
 ---
 
+## Design direction: model on YNAB (decided 2026-07-15)
+
+The app is being deliberately modeled on YNAB — its interface and its feature
+set. This supersedes the "collapse it to two numbers" simplifications made for
+v1; those were scope calls, not preferences, and they get revisited as we take
+more of the real model.
+
+**What we take:** the envelope model itself (assign every dollar a job, Ready to
+Assign counts down to zero), the `Category | Assigned | Activity | Available`
+table, category groups, targets, the red/yellow/green/gray Available semantics,
+the icon vocabulary, the Inspector sidebar, progress bars, the layout and
+information density. Interface conventions and product mechanics are fair game
+and are the substance of what makes YNAB good.
+
+**What we build in their idiom rather than copy outright:** their logo, and
+Wishfarm (their proprietary display face). Figtree — their body font — is
+open-source under the OFL, so that one we can use directly. A close visual
+relative without lifting their brand marks costs us nothing here, since the
+value is in the interaction model, not the wordmark.
+
+Palette pulled from their site, for reference:
+`#FEF9ED` cream canvas, `#545BFE` blurple, `#AEE865` lime, `#1C1F58` navy ink.
+6–8px radii, no shadows, large type (h1 64px, body 24px).
+
+Implication: v1's flat category list with a monthly limit is an interim state.
+The envelope model needs `assigned` per category per month, which the current
+schema has no place for — that's the next real migration, not a coat of paint.
+
+---
+
 ## Competitor research (2026-07-15)
 
 Top three by consistent placement across NerdWallet, CNBC, Forbes, Kiplinger, Ramsey: **YNAB, Monarch Money, Rocket Money**. Mint shut down 2024, don't bother looking at it.

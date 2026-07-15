@@ -22,33 +22,42 @@
 <div class="wrap" id="app" hidden>
   <header>
     <select id="budget-switch" aria-label="Budget"></select>
+    <button class="btn-quiet icon-btn" id="new-budget" aria-label="New budget" title="New budget">+</button>
     <button class="btn-quiet" id="signout">Sign out</button>
   </header>
 
-  <div class="month">
-    <button id="prev" aria-label="Previous month">&lsaquo;</button>
-    <h2 id="month-label"></h2>
-    <button id="next" aria-label="Next month">&rsaquo;</button>
+  <div class="card empty-state" id="no-budget" hidden>
+    <h2>No budget yet</h2>
+    <p class="small muted">Create one to start tracking. Make a personal one, a shared one, or both.</p>
+    <button class="btn" id="first-budget">Create a budget</button>
   </div>
 
-  <div class="card" id="summary"></div>
+  <div id="budget-view">
+    <div class="month">
+      <button id="prev" aria-label="Previous month">&lsaquo;</button>
+      <h2 id="month-label"></h2>
+      <button id="next" aria-label="Next month">&rsaquo;</button>
+    </div>
 
-  <div class="card banner" id="rec-banner" hidden>
-    <span class="small" id="rec-banner-text"></span>
-    <button class="btn" id="apply-rec">Add them</button>
-  </div>
+    <div class="card" id="summary"></div>
 
-  <div class="section-head">
-    <h2>Categories <span class="small muted" id="cat-count"></span></h2>
-    <button class="btn-quiet" id="manage-cats">Manage</button>
-  </div>
-  <div class="rows" id="categories"></div>
+    <div class="card banner" id="rec-banner" hidden>
+      <span class="small" id="rec-banner-text"></span>
+      <button class="btn" id="apply-rec">Add them</button>
+    </div>
 
-  <div class="section-head">
-    <h2>Transactions <span class="small muted" id="txn-count"></span></h2>
-    <button class="btn-quiet" id="manage-rec">Recurring</button>
+    <div class="section-head">
+      <h2>Categories <span class="small muted" id="cat-count"></span></h2>
+      <button class="btn-quiet" id="manage-cats">Manage</button>
+    </div>
+    <div class="rows" id="categories"></div>
+
+    <div class="section-head">
+      <h2>Transactions <span class="small muted" id="txn-count"></span></h2>
+      <button class="btn-quiet" id="manage-rec">Recurring</button>
+    </div>
+    <div class="rows" id="transactions"></div>
   </div>
-  <div class="rows" id="transactions"></div>
 </div>
 
 <button class="btn fab" id="add-btn" hidden>Add transaction</button>

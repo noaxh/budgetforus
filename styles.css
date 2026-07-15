@@ -167,6 +167,11 @@ header select { width: auto; flex: 1; border-color: transparent; background: non
 
 .empty { padding: 32px 16px; text-align: center; color: var(--ink-2); font-size: 14px; }
 
+.empty-state { text-align: center; padding: 36px 20px; margin-top: 22px; }
+.empty-state p { margin: 6px auto 18px; max-width: 32ch; }
+
+.icon-btn { padding: 9px 13px; line-height: 1; font-size: 17px; }
+
 /* ------------------------------------------------------------ add */
 
 .fab {

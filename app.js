@@ -121,9 +121,20 @@ const sumKind = k => state.txns.filter(t => t.kind === k).reduce((s, t) => s + c
 function render() {
   $('month-label').textContent = monthLabel(state.month)
 
-  $('budget-switch').innerHTML =
-    state.budgets.map(b => `<option value="${b.id}" ${b.id === state.budgetId ? 'selected' : ''}>${esc(b.name)}</option>`).join('') +
-    '<option value="__new">New budget…</option>'
+  // No "New budget…" option in here. With zero budgets it would be the only
+  // option and therefore already selected, so picking it fires no change event
+  // and nothing happens -- broken in exactly the case you need it. Creating is
+  // a button.
+  $('budget-switch').innerHTML = state.budgets
+    .map(b => `<option value="${b.id}" ${b.id === state.budgetId ? 'selected' : ''}>${esc(b.name)}</option>`)
+    .join('')
+
+  const has = !!state.budgetId
+  $('no-budget').hidden = has
+  $('budget-view').hidden = !has
+  $('budget-switch').hidden = !has
+  $('add-btn').hidden = !has
+  if (!has) return
 
   const spent = spentByCat()
   const totalSpent = sumKind('expense')
@@ -223,18 +234,21 @@ $('prev').onclick = () => { state.month = new Date(state.month.getFullYear(), st
 $('next').onclick = () => { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + 1, 1); refresh() }
 
 $('budget-switch').onchange = async e => {
-  if (e.target.value === '__new') {
-    const name = prompt('Budget name')  // ponytail: native prompt. It's one action, run twice, ever.
-    if (name?.trim()) {
-      const { error } = await sb.from('budgets').insert({ name: name.trim() })
-      if (error) return fail(error)
-    }
-    await loadBudgets()
-  } else {
-    state.budgetId = e.target.value
-  }
+  state.budgetId = e.target.value
   await refresh()
 }
+
+async function newBudget() {
+  const name = prompt('Budget name')  // ponytail: native prompt. Run twice, ever.
+  if (!name?.trim()) return
+  const { error } = await sb.from('budgets').insert({ name: name.trim() })
+  if (error) return fail(error)
+  await loadBudgets()   // a trigger makes the creator a member, so it comes back
+  await refresh()
+}
+
+$('new-budget').onclick = newBudget
+$('first-budget').onclick = newBudget
 
 $('add-btn').onclick = () => openTxn(null)
 $('txn-cancel').onclick = () => $('txn-dialog').close()
