@@ -2,25 +2,39 @@
 
 Shared budgeting website for two people (me + friend). Supabase backend, private access only.
 
-Status: **v1 code written, not yet connected to a real Supabase project.**
+Status: **LIVE.** Google login works end to end as of 2026-07-15.
 
-- `index.html` — the whole app. Single file, no build step.
-- `schema.sql` — tables, RLS policies, triggers. Paste into the Supabase SQL editor, run once.
+- Live: https://budgetforus.vercel.app
+- Repo: https://github.com/noaxh/budgetforus (own repo, separate from the desktop monorepo — keeps NDP client work out of the Vercel deploy)
+- Supabase project: `budgetforus` / ref `aeqydektxshybtyjkekp`
 
-### To actually run it
+| File | What |
+|---|---|
+| `index.html` | Markup |
+| `styles.css` | All styling |
+| `app.js` | Client logic, Supabase, auth |
+| `schema.sql` | Tables, RLS policies, triggers |
 
-1. Create a Supabase project.
-2. SQL editor → paste `schema.sql` → run.
-3. Project Settings → API → copy Project URL + anon key into the two constants at the top of the `<script>` in `index.html`.
-4. Google OAuth setup — see the Auth section below.
-5. Auth → URL Configuration → add `http://localhost:5620` for local dev.
-6. Sign in. Switcher → "New budget…" to create one.
-7. Add your friend: Authentication → Users → copy their id, then in the SQL editor:
-   `insert into budget_members values ('<budget-id>', '<their-user-id>');`
-8. Auth → Sign-ups → **disable**, once you're both in.
+Deploy: push to `main`, Vercel auto-deploys. Vercel settings — Preset "Other", Root `./`, no build command, no env vars (config is public by design and lives in `app.js`).
 
-Local dev server: `budget-app` config in `.claude/launch.json`, port 5620.
-Self-check: load `index.html?selftest`, check console for `selftest ok`.
+Local dev: `budget-app` config in `.claude/launch.json`, port 5620.
+Self-check: load `?selftest`, console shows `selftest ok`.
+
+### Still to do
+
+- [ ] **Rotate `sb_secret_…`** — it was pasted into a chat transcript, treat as burned. Nothing uses it, so rotating breaks nothing.
+- [ ] **Disable sign-ups** (Auth → Sign-ups) once both users have logged in. Until then anyone with the public key can register an account.
+- [ ] Add the friend to the shared budget: Authentication → Users → copy their id →
+      `insert into budget_members values ('<budget-id>', '<their-user-id>');`
+
+### Setup traps hit along the way (for next time)
+
+The OAuth chain took four rounds. In order:
+
+1. **`redirect_uri_mismatch`** — Google's "Authorized redirect URIs" needs `https://aeqydektxshybtyjkekp.supabase.co/auth/v1/callback` exactly. Easy to mis-paste into "Authorized JavaScript origins" right above it, which rejects paths.
+2. **Bounced to `localhost:3000`** — when `redirectTo` isn't allowlisted, Supabase silently falls back to Site URL, which defaults to `localhost:3000`. Fix in Auth → URL Configuration. Needs the `/**` wildcard, since the app sends `origin + pathname`.
+3. **`Unable to exchange external code`** — stale Client Secret. The Client ID matched, but a second OAuth client had been created and only the ID field was updated. The secret is masked in both UIs, so it can't be verified by eye — re-issue it rather than trying to compare.
+4. Google Cloud Console needs **no change** when the app's own URL changes. Google only ever redirects to the Supabase callback; Supabase redirects onward.
 
 ---
 
