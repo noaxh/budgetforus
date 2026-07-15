@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Budget">
+<meta name="theme-color" content="#F7F6F3">
+<title>Budget</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="login" id="login" hidden>
+  <h1>Budget</h1>
+  <p>Shared and personal spending, in one place.</p>
+  <div><button class="btn" id="signin">Continue with Google</button></div>
+  <p class="small" id="login-err" style="color:var(--over-fg)" hidden></p>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <header>
+    <select id="budget-switch" aria-label="Budget"></select>
+    <button class="btn-quiet" id="manage-cats">Categories</button>
+    <button class="btn-quiet" id="signout">Sign out</button>
+  </header>
+
+  <div class="month">
+    <button id="prev" aria-label="Previous month">&lsaquo;</button>
+    <h2 id="month-label"></h2>
+    <button id="next" aria-label="Next month">&rsaquo;</button>
+  </div>
+
+  <div class="card" id="summary"></div>
+
+  <div class="section-head"><h2>Categories</h2><span class="small muted" id="cat-count"></span></div>
+  <div class="rows" id="categories"></div>
+
+  <div class="section-head"><h2>Transactions</h2><span class="small muted" id="txn-count"></span></div>
+  <div class="rows" id="transactions"></div>
+</div>
+
+<button class="btn fab" id="add-btn" hidden>Add transaction</button>
+
+<dialog id="txn-dialog">
+  <form class="sheet" method="dialog" id="txn-form">
+    <div class="sheet-head"><h2 id="txn-title">Add transaction</h2></div>
+    <div class="field">
+      <label for="t-amount">Amount</label>
+      <input type="number" id="t-amount" inputmode="decimal" step="0.01" min="0.01" required>
+    </div>
+    <div class="field">
+      <label for="t-desc">Description</label>
+      <input type="text" id="t-desc" maxlength="120" placeholder="Groceries at Metro">
+    </div>
+    <div class="field">
+      <label for="t-cat">Category</label>
+      <select id="t-cat"></select>
+    </div>
+    <div class="field">
+      <label for="t-date">Date</label>
+      <input type="date" id="t-date" required>
+    </div>
+    <p class="small" id="txn-err" style="color:var(--over-fg);margin-top:12px" hidden></p>
+    <div class="sheet-actions">
+      <button type="button" class="btn-quiet" id="txn-cancel" style="flex:1">Cancel</button>
+      <button type="submit" class="btn">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="cat-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Categories</h2></div>
+    <form id="cat-add" class="cat-edit">
+      <input type="text" id="c-name" placeholder="New category" maxlength="40" required aria-label="Category name">
+      <input type="number" id="c-limit" placeholder="Limit" inputmode="decimal" step="0.01" min="0" aria-label="Monthly limit">
+      <button type="submit" class="btn" style="padding:10px 14px">Add</button>
+    </form>
+    <div id="cat-list"></div>
+    <p class="small muted" style="margin-top:14px">A limit of 0 means the category is tracked but never flags.</p>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="cat-done">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
