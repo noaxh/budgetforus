@@ -113,6 +113,28 @@ header select { width: auto; flex: 1; border-color: transparent; background: non
 .total { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .total .amt { font-size: 26px; font-weight: 600; }
 
+/* Income / left-over. Hidden entirely when no income is logged -- "$0.00 left"
+   on an expenses-only month is noise, not information. */
+.net {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  font-size: 13px; color: var(--ink-2);
+}
+.net .left-amt { font-size: 15px; font-weight: 600; color: var(--ink); }
+.net .left-amt.neg { color: var(--over-fg); }
+
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.banner .btn { padding: 9px 14px; font-size: 14px; white-space: nowrap; }
+
+.income-amt { color: var(--ok-fg); }
+
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+
+.rec-edit { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
+.rec-edit + .rec-edit { border-top: 1px solid var(--line); }
+.rec-edit .body { flex: 1; min-width: 0; }
+.rec-edit .desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .bar { height: 4px; border-radius: 2px; background: var(--none-bg); overflow: hidden; margin-top: 12px; }
 .bar > i { display: block; height: 100%; border-radius: 2px; transition: width 300ms cubic-bezier(0.16,1,0.3,1); }
 

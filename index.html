@@ -22,7 +22,6 @@
 <div class="wrap" id="app" hidden>
   <header>
     <select id="budget-switch" aria-label="Budget"></select>
-    <button class="btn-quiet" id="manage-cats">Categories</button>
     <button class="btn-quiet" id="signout">Sign out</button>
   </header>
 
@@ -34,10 +33,21 @@
 
   <div class="card" id="summary"></div>
 
-  <div class="section-head"><h2>Categories</h2><span class="small muted" id="cat-count"></span></div>
+  <div class="card banner" id="rec-banner" hidden>
+    <span class="small" id="rec-banner-text"></span>
+    <button class="btn" id="apply-rec">Add them</button>
+  </div>
+
+  <div class="section-head">
+    <h2>Categories <span class="small muted" id="cat-count"></span></h2>
+    <button class="btn-quiet" id="manage-cats">Manage</button>
+  </div>
   <div class="rows" id="categories"></div>
 
-  <div class="section-head"><h2>Transactions</h2><span class="small muted" id="txn-count"></span></div>
+  <div class="section-head">
+    <h2>Transactions <span class="small muted" id="txn-count"></span></h2>
+    <button class="btn-quiet" id="manage-rec">Recurring</button>
+  </div>
   <div class="rows" id="transactions"></div>
 </div>
 
@@ -46,6 +56,13 @@
 <dialog id="txn-dialog">
   <form class="sheet" method="dialog" id="txn-form">
     <div class="sheet-head"><h2 id="txn-title">Add transaction</h2></div>
+    <div class="field">
+      <label for="t-kind">Type</label>
+      <select id="t-kind">
+        <option value="expense">Expense</option>
+        <option value="income">Income</option>
+      </select>
+    </div>
     <div class="field">
       <label for="t-amount">Amount</label>
       <input type="number" id="t-amount" inputmode="decimal" step="0.01" min="0.01" required>
@@ -82,6 +99,49 @@
     <p class="small muted" style="margin-top:14px">A limit of 0 means the category is tracked but never flags.</p>
     <div class="sheet-actions">
       <button type="button" class="btn" id="cat-done">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="rec-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Recurring</h2></div>
+    <form id="rec-add">
+      <div class="field">
+        <label for="r-desc">Description</label>
+        <input type="text" id="r-desc" maxlength="120" placeholder="Rent" required>
+      </div>
+      <div class="row-2">
+        <div class="field" style="margin-top:0">
+          <label for="r-amount">Amount</label>
+          <input type="number" id="r-amount" inputmode="decimal" step="0.01" min="0.01" required>
+        </div>
+        <div class="field" style="margin-top:0">
+          <label for="r-day">Day of month</label>
+          <input type="number" id="r-day" inputmode="numeric" min="1" max="31" value="1" required>
+        </div>
+      </div>
+      <div class="row-2">
+        <div class="field" style="margin-top:0">
+          <label for="r-kind">Type</label>
+          <select id="r-kind">
+            <option value="expense">Expense</option>
+            <option value="income">Income</option>
+          </select>
+        </div>
+        <div class="field" style="margin-top:0">
+          <label for="r-cat">Category</label>
+          <select id="r-cat"></select>
+        </div>
+      </div>
+      <div class="sheet-actions">
+        <button type="submit" class="btn">Add rule</button>
+      </div>
+    </form>
+    <div id="rec-list"></div>
+    <p class="small muted" style="margin-top:14px">Rules don't create anything on their own. Each month you choose when to add them.</p>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="rec-done">Done</button>
     </div>
   </div>
 </dialog>

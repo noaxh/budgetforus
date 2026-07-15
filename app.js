@@ -31,6 +31,14 @@ const monthEnd   = d => `${monthKey(d)}-${String(new Date(d.getFullYear(), d.get
 const monthLabel = d => d.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })
 const today      = () => { const d = new Date(); return `${monthKey(d)}-${String(d.getDate()).padStart(2, '0')}` }
 
+// Where a "31st of the month" rule lands in February. Clamping to the last day
+// keeps the date deterministic per rule per month, which is exactly what the
+// unique index on (recurring_id, occurred_on) relies on to stop double-charging.
+const recurringDate = (d, day) => {
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+  return `${monthKey(d)}-${String(Math.min(day, last)).padStart(2, '0')}`
+}
+
 // ---------------------------------------------------------------- self-check
 // Load with ?selftest to run. Money and month-end are the only logic here that
 // can be quietly wrong, so they're the only things checked.
@@ -46,12 +54,16 @@ if (location.search.includes('selftest')) {
   eq(monthEnd(new Date(2026, 1, 1)), '2026-02-28', 'february')
   eq(monthEnd(new Date(2024, 1, 1)), '2024-02-29', 'leap february')
   eq(monthStart(new Date(2026, 6, 15)), '2026-07-01', 'month start ignores day')
+  eq(recurringDate(new Date(2026, 6, 1), 15), '2026-07-15', 'normal day passes through')
+  eq(recurringDate(new Date(2026, 1, 1), 31), '2026-02-28', 'day 31 clamps to Feb 28')
+  eq(recurringDate(new Date(2024, 1, 1), 31), '2024-02-29', 'day 31 clamps to leap Feb')
+  eq(recurringDate(new Date(2026, 3, 1), 31), '2026-04-30', 'day 31 clamps to Apr 30')
   console.log('selftest ok')
 }
 
 // ---------------------------------------------------------------- state
 
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], editing: null }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], recurring: [], editing: null }
 const $ = id => document.getElementById(id)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
@@ -65,29 +77,46 @@ async function loadBudgets() {
 }
 
 async function loadMonth() {
-  if (!state.budgetId) { state.cats = []; state.txns = []; return }
-  const [c, t] = await Promise.all([
+  if (!state.budgetId) { state.cats = []; state.txns = []; state.recurring = []; return }
+  const [c, t, r] = await Promise.all([
     sb.from('categories').select('*').eq('budget_id', state.budgetId).order('sort').order('name'),
     sb.from('transactions').select('*').eq('budget_id', state.budgetId)
       .gte('occurred_on', monthStart(state.month))
       .lte('occurred_on', monthEnd(state.month))
-      .order('occurred_on', { ascending: false })
+      .order('occurred_on', { ascending: false }),
+    sb.from('recurring').select('*').eq('budget_id', state.budgetId)
+      .eq('active', true).order('day_of_month')
   ])
   if (c.error) return fail(c.error)
   if (t.error) return fail(t.error)
+  if (r.error) return fail(r.error)
   state.cats = c.data ?? []
   state.txns = t.data ?? []
+  state.recurring = r.data ?? []
+}
+
+// Rules with no transaction yet in the month on screen.
+const pendingRecurring = () => {
+  const applied = new Set(state.txns.map(t => t.recurring_id).filter(Boolean))
+  return state.recurring.filter(r => !applied.has(r.id))
 }
 
 const fail = e => { console.error(e); alert(e.message ?? String(e)) }
 
 // ---------------------------------------------------------------- render
 
+// Expenses only. Income filed under a category must not count against its limit,
+// or a paycheque tagged "Groceries" would quietly buy back grocery headroom.
 function spentByCat() {
   const m = new Map()
-  for (const t of state.txns) m.set(t.category_id, (m.get(t.category_id) ?? 0) + cents(t.amount))
+  for (const t of state.txns) {
+    if (t.kind !== 'expense') continue
+    m.set(t.category_id, (m.get(t.category_id) ?? 0) + cents(t.amount))
+  }
   return m
 }
+
+const sumKind = k => state.txns.filter(t => t.kind === k).reduce((s, t) => s + cents(t.amount), 0)
 
 function render() {
   $('month-label').textContent = monthLabel(state.month)
@@ -97,16 +126,29 @@ function render() {
     '<option value="__new">New budget…</option>'
 
   const spent = spentByCat()
-  const totalSpent = state.txns.reduce((s, t) => s + cents(t.amount), 0)
+  const totalSpent = sumKind('expense')
+  const totalIncome = sumKind('income')
   const totalLimit = state.cats.reduce((s, c) => s + cents(c.monthly_limit), 0)
   const st = status(totalSpent, totalLimit)
+  const left = totalIncome - totalSpent
 
   $('summary').innerHTML = `
     <div class="total">
       <span class="amt num">${money(totalSpent)}</span>
       <span class="small muted num">${totalLimit ? `of ${money(totalLimit)}` : 'no limits set'}</span>
     </div>
-    <div class="bar"><i class="f-${st}" style="width:${totalLimit ? Math.min(100, totalSpent / totalLimit * 100) : 0}%"></i></div>`
+    <div class="bar"><i class="f-${st}" style="width:${totalLimit ? Math.min(100, totalSpent / totalLimit * 100) : 0}%"></i></div>
+    ${totalIncome ? `<div class="net">
+      <span class="num">Income ${money(totalIncome)}</span>
+      <span class="num left-amt ${left < 0 ? 'neg' : ''}">${money(left)} ${left < 0 ? 'over' : 'left'}</span>
+    </div>` : ''}`
+
+  const pend = pendingRecurring()
+  $('rec-banner').hidden = !pend.length
+  if (pend.length) {
+    $('rec-banner-text').textContent =
+      `${pend.length} recurring ${pend.length === 1 ? 'item' : 'items'} not added for ${monthLabel(state.month)}.`
+  }
 
   $('cat-count').textContent = state.cats.length ? `${state.cats.length}` : ''
   $('categories').innerHTML = state.cats.length ? state.cats.map(c => {
@@ -130,9 +172,9 @@ function render() {
     <div class="row txn">
       <div class="body" data-edit="${t.id}" style="cursor:pointer">
         <div class="desc">${esc(t.description) || '<span class="muted">No description</span>'}</div>
-        <div class="small muted">${t.occurred_on} &middot; ${esc(catName(t.category_id))}</div>
+        <div class="small muted">${t.occurred_on} &middot; ${esc(catName(t.category_id))}${t.recurring_id ? ' &middot; recurring' : ''}</div>
       </div>
-      <span class="num">${money(cents(t.amount))}</span>
+      <span class="num ${t.kind === 'income' ? 'income-amt' : ''}">${t.kind === 'income' ? '+' : ''}${money(cents(t.amount))}</span>
       <button class="del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>
     </div>`).join('') : '<div class="empty">Nothing logged this month.</div>'
 }
@@ -209,14 +251,18 @@ $('transactions').onclick = async e => {
   if (edit) openTxn(state.txns.find(t => t.id === edit.dataset.edit))
 }
 
+const catOptions = (selected, blank = 'Uncategorized') =>
+  `<option value="">${blank}</option>` +
+  state.cats.map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.name)}</option>`).join('')
+
 function openTxn(t) {
   state.editing = t?.id ?? null
   $('txn-title').textContent = t ? 'Edit transaction' : 'Add transaction'
+  $('t-kind').value = t?.kind ?? 'expense'
   $('t-amount').value = t ? t.amount : ''
   $('t-desc').value = t?.description ?? ''
   $('t-date').value = t?.occurred_on ?? today()
-  $('t-cat').innerHTML = '<option value="">Uncategorized</option>' +
-    state.cats.map(c => `<option value="${c.id}" ${c.id === t?.category_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')
+  $('t-cat').innerHTML = catOptions(t?.category_id)
   $('txn-err').hidden = true
   $('txn-dialog').showModal()
 }
@@ -226,6 +272,7 @@ $('txn-form').onsubmit = async e => {
   if (!state.budgetId) return fail(new Error('Create a budget first.'))
   const row = {
     budget_id:   state.budgetId,
+    kind:        $('t-kind').value,
     amount:      Number($('t-amount').value),
     description: $('t-desc').value.trim(),
     category_id: $('t-cat').value || null,
@@ -288,4 +335,69 @@ $('cat-list').onclick = async e => {
   const { error } = await sb.from('categories').delete().eq('id', b.dataset.delcat)
   if (error) return fail(error)
   await loadMonth(); renderCats(); render()
+}
+
+// ---------------------------------------------------------------- recurring
+
+$('manage-rec').onclick = () => {
+  $('r-cat').innerHTML = catOptions(null)
+  renderRec()
+  $('rec-dialog').showModal()
+}
+$('rec-done').onclick = () => { $('rec-dialog').close(); refresh() }
+
+function renderRec() {
+  $('rec-list').innerHTML = state.recurring.length ? state.recurring.map(r => `
+    <div class="rec-edit">
+      <div class="body">
+        <div class="desc">${esc(r.description)}</div>
+        <div class="small muted">day ${r.day_of_month} &middot; ${r.kind}${r.category_id ? ` &middot; ${esc(state.cats.find(c => c.id === r.category_id)?.name ?? '')}` : ''}</div>
+      </div>
+      <span class="num ${r.kind === 'income' ? 'income-amt' : ''}">${r.kind === 'income' ? '+' : ''}${money(cents(r.amount))}</span>
+      <button class="del" data-delrec="${r.id}" aria-label="Delete rule" style="font-size:18px;color:var(--ink-2);padding:4px 8px">&times;</button>
+    </div>`).join('') : '<div class="empty">No rules yet.</div>'
+}
+
+$('rec-add').onsubmit = async e => {
+  e.preventDefault()
+  if (!state.budgetId) return fail(new Error('Create a budget first.'))
+  const { error } = await sb.from('recurring').insert({
+    budget_id:    state.budgetId,
+    kind:         $('r-kind').value,
+    amount:       Number($('r-amount').value),
+    description:  $('r-desc').value.trim(),
+    category_id:  $('r-cat').value || null,
+    day_of_month: Number($('r-day').value)
+  })
+  if (error) return fail(error)
+  $('r-desc').value = ''; $('r-amount').value = ''; $('r-day').value = '1'
+  await loadMonth(); renderRec(); render()
+}
+
+$('rec-list').onclick = async e => {
+  const b = e.target.closest('[data-delrec]')
+  if (!b) return
+  if (!confirm('Delete this rule? Transactions it already created stay.')) return
+  const { error } = await sb.from('recurring').delete().eq('id', b.dataset.delrec)
+  if (error) return fail(error)
+  await loadMonth(); renderRec(); render()
+}
+
+$('apply-rec').onclick = async () => {
+  const rows = pendingRecurring().map(r => ({
+    budget_id:   state.budgetId,
+    kind:        r.kind,
+    amount:      r.amount,
+    description: r.description,
+    category_id: r.category_id,
+    occurred_on: recurringDate(state.month, r.day_of_month),
+    recurring_id: r.id
+  }))
+  if (!rows.length) return
+  // ignoreDuplicates leans on the unique index: if we both press this at the same
+  // moment, the loser's rows are skipped rather than charging rent twice.
+  const { error } = await sb.from('transactions')
+    .upsert(rows, { onConflict: 'recurring_id,occurred_on', ignoreDuplicates: true })
+  if (error) return fail(error)
+  refresh()
 }
