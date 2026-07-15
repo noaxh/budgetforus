@@ -22,10 +22,13 @@ Self-check: load `?selftest`, console shows `selftest ok`.
 
 ### Still to do
 
-- [ ] **Rotate `sb_secret_…`** — it was pasted into a chat transcript, treat as burned. Nothing uses it, so rotating breaks nothing.
-- [ ] **Disable sign-ups** (Auth → Sign-ups) once both users have logged in. Until then anyone with the public key can register an account.
-- [ ] Add the friend to the shared budget: Authentication → Users → copy their id →
-      `insert into budget_members values ('<budget-id>', '<their-user-id>');`
+- [x] ~~Rotate `sb_secret_…`~~ — done 2026-07-15.
+- [ ] **Onboard the friend, then close signups.** Sign-ups are still on deliberately; closing them first locks the friend out. Order:
+      1. Add their Gmail as a **test user** on the Google OAuth consent screen (still in Testing mode — Google refuses anyone not listed, and it looks like a broken login rather than a permissions error).
+      2. They sign in at the live URL.
+      3. Authentication → Users → copy their id.
+      4. `insert into budget_members values ('<budget-id>', '<their-user-id>');` — get the budget id from `select id, name from budgets;`
+      5. **Then** Auth → Sign-ups → disable.
 
 ### Setup traps hit along the way (for next time)
 

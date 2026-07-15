@@ -91,13 +91,19 @@ every competitor), subscription cancellation, credit score, net worth, investmen
 
 ## Open items (as of 2026-07-15)
 
-- [ ] **Rotate `sb_secret_…`** — pasted into a chat transcript, treat as burned. Nothing
-      uses it, so rotating breaks nothing. Has been raised repeatedly and not yet done.
-- [ ] **Disable sign-ups** (Auth → Sign-ups) once both users are in. Until then anyone
-      with the public key can register an account. RLS still blocks their reads, so it's
-      not an emergency — but it's one of three layers currently switched off.
-- [ ] Add the friend to the shared budget:
-      `insert into budget_members values ('<budget-id>', '<their-user-id>');`
+- [x] ~~Rotate `sb_secret_…`~~ — done 2026-07-15.
+- [ ] **Onboard the friend, then close signups.** Sign-ups are deliberately still ON —
+      closing them before the friend registers would lock them out. Order matters:
+      1. Confirm their Gmail is a **test user** on the Google OAuth consent screen. It's
+         still in Testing mode (an intentional extra gate), so Google refuses anyone not
+         listed — which presents as a broken login, not as a permissions message.
+      2. They sign in at the live URL.
+      3. Authentication → Users → copy their id.
+      4. `insert into budget_members values ('<budget-id>', '<their-user-id>');`
+      5. **Then** Auth → Sign-ups → disable.
+
+      Until step 5, anyone holding the public key can register an account. RLS still
+      blocks their reads, so it isn't an emergency — but one of the three layers is off.
 - [ ] Recommended before more building: **use it for a week with real data.** The envelope
       model is demanding and plenty of people bounce off it. Better to learn that from real
       use than to migrate the schema twice.
