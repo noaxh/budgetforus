@@ -11,31 +11,46 @@ Private budgeting app for Noah and one friend. Live, in real use.
 
 **The app is being modeled on YNAB** — its interface and its feature set. This is the
 governing direction. When a choice is ambiguous, the answer is usually "what does YNAB do".
+The **"Visual and layout spec"** section of [NOTES.md](NOTES.md) is the governing design
+reference: exact tokens, the four Available states, the category table, the Inspector, the
+register columns, and the mobile five-tab / desktop sidebar shell. Read it before any UI work.
 
-The next real piece of work is **the envelope model**, and it is a migration, not a restyle:
+**The envelope model shipped in v3** (`schema-v3.sql`, 2026-07-15) — `assignments` holds
+one row per category per month, and `Assigned`, `Activity`, `Available` and Ready to Assign
+all derive from it in `rollup()`. Read the v3 section of NOTES.md before touching that
+function: it documents three deliberate divergences from YNAB, and each one looks like a
+bug if you don't know it was a decision.
 
-- YNAB's core is `Category | Assigned | Activity | Available`, with "Ready to Assign"
-  counting down to zero as you give every dollar a job.
-- The current schema **cannot express this**. A category has one static `monthly_limit`.
-  The envelope model needs **`assigned` per category per month** — a table that doesn't
-  exist yet. `Assigned`, `Activity`, `Available` and Ready to Assign all fall out of it.
-- v1's flat category+limit list is an **interim state**, not a design preference. It was
-  a scope call.
-- Doing this means: new table, a migration, and rewriting the category rendering. Budget
-  the work accordingly. Anyone who says "make it look like YNAB" and means CSS has not
-  understood the problem.
+Roadmap from here. A **full YNAB feature audit** (every feature mapped to
+have/partial/planned/skip) and the phased build plan live in the "YNAB feature parity" and
+"Build plan for the gaps" sections of [NOTES.md](NOTES.md). Read those before starting a
+feature. The phases, in recommended order:
 
-Also on the roadmap, in rough order of value:
+1. **Phase A — cheap wins + the shell:** stand up the design system (tokens, the category
+   table, the four Available states, the mobile five-tab / desktop sidebar+Inspector shell)
+   per the "Visual and layout spec" in NOTES.md, then category groups, flags/color tags,
+   hide-amounts toggle, payee autocomplete, CSV export, extra auto-assign modes.
+2. **Phase B — targets engine (keystone):** real goal types (by-date, refill-to, sinking)
+   replacing the flat `monthly_limit`, plus the yellow "underfunded" state v3 cannot express,
+   plus Cost to Be Me. Highest value.
+3. **Phase C — richer transactions:** splits, bulk action bar, Money Moves history, and
+   *enhancements only* to the already-shipped `recurring` feature (auto-apply, richer
+   cadence). Recurring itself shipped in v2 (`recurring` table + the Recurring dialog); do
+   not rebuild it or add a second `scheduled_transactions` table.
+4. **Phase D — reflect/reports:** spending breakdown, income vs expense, age of money.
+5. **Phase E — accounts subsystem (OPTIONAL):** multiple accounts, cleared/working balance,
+   reconcile, transfers, tracking accounts + net worth, and credit-card handling. The one
+   fork in the road; decide before Phase C (see Open decisions in NOTES.md). May never be
+   wanted for a two-person joint pot.
+6. **Phase F — standalone/lifecycle:** file-based CSV/OFX import (the sanctioned non-Plaid
+   import), loan/debt calculator, Fresh Start, focused views.
 
-1. Envelope model (above)
-2. Category groups (YNAB nests categories under groups)
-3. Targets per category (YNAB's goals)
-4. Settle-up / who-owes-who — **only if asked**; the shared budget is a joint pot, not
-   split costs, so this may never be wanted
-5. Charts — explicitly deprioritized; nice to look at, changes no decisions
+Settle-up / who-owes-who stays out unless asked (the shared budget is a joint pot, not split
+costs).
 
-Deliberately **not** doing: bank sync (Plaid costs money and is most of the complexity in
-every competitor), subscription cancellation, credit score, net worth, investments.
+Deliberately **not** doing: bank sync via Plaid (costs money, most of the complexity in every
+competitor), subscription cancellation, credit score, mobile native widgets, forecasting,
+public API.
 
 ## Locked decisions — do not relitigate
 
@@ -91,6 +106,16 @@ every competitor), subscription cancellation, credit score, net worth, investmen
 
 ## Open items (as of 2026-07-15)
 
+- [x] ~~**Run `schema-v3.sql`.**~~ Done 2026-07-16. A prior partial run had left the budget
+      delete policy behind, so the plain script died on `42710` (policy already exists); an
+      idempotent version ran clean and `schema-v3.sql` is now guarded (drop-if-exists /
+      if-not-exists) so future re-runs are safe.
+- [ ] **Run `schema-v4.sql` before (or with) the next deploy.** Adds
+      `categories.group_name` and `transactions.flag`, both nullable. The Phase A client
+      writes a `flag` on every transaction and a `group_name` on categories, so until this
+      runs, **adding a transaction or category errors** with "column ... does not exist".
+      Idempotent; paste the contents (Ctrl+A first). Run the SQL FIRST, then push the code,
+      so there is never a window where the new code hits missing columns.
 - [x] ~~Rotate `sb_secret_…`~~ — done 2026-07-15.
 - [ ] **Onboard the friend, then close signups.** Sign-ups are deliberately still ON —
       closing them before the friend registers would lock them out. Order matters:

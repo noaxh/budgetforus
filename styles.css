@@ -33,6 +33,20 @@
 
   --r-card: 16px;
   --r-ctl:  999px;
+
+  /* The stock CSS easings are too weak to read as intentional. These were
+     already in the file four times over as literals; they're tokens now so the
+     whole app presses and slides with one personality.
+     --ease-out   anything entering or responding to a press: starts fast, so the
+                  frame the user is watching most closely is the one that moves.
+                  Never ease-in here -- same duration, feels slower.
+     --ease-drawer  Ionic's iOS drawer curve, for the sheets only. */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Press feedback lives at 100-160ms. Slower reads as lag on the one
+     interaction that must feel instant. */
+  --t-press: 140ms;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -71,6 +85,14 @@ h1 { font-size: 40px; }
 h2 { font-size: 19px; }
 
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+/* Hide-amounts: glance privacy on a shared phone. Blur every money value, keep
+   the layout intact. NOT security -- the numbers are still in the DOM. The
+   transition only fires on toggle: render() rebuilds these nodes, so on a normal
+   refresh there is no previous value to animate from. */
+.num, .pill { transition: filter 160ms var(--ease-out); }
+body.amounts-hidden .num,
+body.amounts-hidden .pill { filter: blur(7px); -webkit-user-select: none; user-select: none; }
 .muted { color: var(--ink-2); }
 .small { font-size: 13px; }
 
@@ -112,43 +134,82 @@ button {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),   /* specular top edge */
     0 4px 14px rgba(84, 91, 254, 0.26);
-  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), filter 140ms;
+  transition: transform var(--t-press) var(--ease-out), filter var(--t-press) ease;
 }
-.btn:hover  { filter: brightness(1.08); }
 .btn:active { transform: scale(0.96); }
 
 .btn-quiet {
-  background: rgba(28, 31, 88, 0.05);
+  background-color: rgba(28, 31, 88, 0.05);
   border-radius: var(--r-ctl);
   padding: 10px 16px;
   min-height: var(--tap);
   font-size: 14px; font-weight: 600;
   color: var(--ink);
-  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), background 140ms;
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
 }
-.btn-quiet:hover  { background: rgba(28, 31, 88, 0.09); }
 .btn-quiet:active { transform: scale(0.96); }
 
 .icon-btn { padding: 0; width: var(--tap); font-size: 20px; font-weight: 500; line-height: 1; }
+
+/* Every pressable thing scales on :active. Without it the interface gives no
+   sign it heard the tap until the data comes back. 0.96 is deliberate -- deeper
+   than ~0.95 stops reading as a press and starts reading as a glitch. */
+.icon-btn:active, .btn-danger:active, .del:active { transform: scale(0.96); }
+
+/* Buttons had no focus style at all, so keyboard users got whatever the UA drew
+   on top of a custom-painted control. :focus-visible, so it never shows on tap. */
+button:focus-visible {
+  outline: 2px solid var(--blurple);
+  outline-offset: 3px;
+}
+
+/* Touch devices fire :hover on tap and then LEAVE IT STUCK until you tap
+   something else. This app is phone-first, so every hover in the file is gated
+   behind a real pointer. */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover        { filter: brightness(1.08); }
+  .btn-quiet:hover  { background-color: rgba(28, 31, 88, 0.09); }
+  .month button:hover { background-color: rgba(28, 31, 88, 0.09); }
+  .btn-danger:hover { background-color: var(--over-bg); }
+  .txn .del:hover, .rec-edit .del:hover, .cat-edit .del:hover {
+    background-color: var(--over-bg); color: var(--over-fg);
+  }
+}
 
 input, select {
   font: inherit;
   font-size: 16px;              /* below 16 and iOS zooms the page on focus */
   width: 100%;
   min-height: var(--tap);
-  background: rgba(28, 31, 88, 0.04);
+  /* background-color, not the background shorthand: the shorthand resets
+     background-image, which is where the select chevron lives. */
+  background-color: rgba(28, 31, 88, 0.04);
   border: 1px solid transparent;
   border-radius: 12px;
   padding: 11px 14px;
   color: var(--ink);
   -webkit-appearance: none;
   appearance: none;
+  transition: border-color var(--t-press) ease, background-color var(--t-press) ease;
 }
 input:focus, select:focus {
   outline: none;
   border-color: var(--blurple);
-  background: var(--surface);
+  background-color: var(--surface);
   box-shadow: 0 0 0 4px rgba(84, 91, 254, 0.15);
+}
+
+/* appearance:none strips the native chevron, and nothing had put one back --
+   so every menu in the app rendered as flat text with no sign it opened
+   anything. The affordance IS the control; without it the budget switcher is
+   invisible furniture. */
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236B6F9E' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.5l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 36px;
+  cursor: pointer;
 }
 
 label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
@@ -165,24 +226,32 @@ header {
   backdrop-filter: blur(24px) saturate(180%);
   box-shadow: 0 1px 0 var(--line);
 }
+/* The budget switcher is the only navigation in the app, so it reads as a title
+   with a chevron rather than as a form control -- but it still has to say
+   "I open something". Tighter chevron gap than the sheet selects: this one
+   hangs off the text, it isn't sitting in a filled box. */
 header select {
   width: auto; flex: 1;
-  background: none; border: none;
+  background-color: transparent; border: none;
   font-weight: 700; font-size: 17px;
-  padding-left: 2px; min-height: var(--tap);
+  padding-left: 2px; padding-right: 24px;
+  min-height: var(--tap);
+  background-position: right 2px center;
 }
-header select:focus { box-shadow: none; background: none; }
+header select:focus { box-shadow: none; background-color: transparent; }
+header select:focus-visible { outline: 2px solid var(--blurple); outline-offset: 2px; border-radius: 8px; }
 
 .month { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 16px; }
 .month button {
   width: var(--tap); height: var(--tap);
   border-radius: 50%;
-  background: rgba(28, 31, 88, 0.05);
+  background-color: rgba(28, 31, 88, 0.05);
   font-size: 20px; line-height: 1;
-  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), background 140ms;
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
 }
-.month button:hover  { background: rgba(28, 31, 88, 0.09); }
-.month button:active { transform: scale(0.9); }
+/* Was 0.9 -- a 44px circle collapsing by 4px reads as the button breaking, not
+   as a press. Matches every other control now. */
+.month button:active { transform: scale(0.96); }
 
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 26px 0 10px; }
 
@@ -195,18 +264,20 @@ header select:focus { box-shadow: none; background: none; }
   box-shadow: 0 1px 2px rgba(28, 31, 88, 0.04), 0 8px 24px rgba(28, 31, 88, 0.04);
 }
 
-.total { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.total .amt { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; }
+/* Ready to Assign. The number the whole method counts down to zero, so it gets
+   the size the old total-spent number had. */
+.rta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rta .amt { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; }
+.rta .btn-quiet { flex: none; white-space: nowrap; }
+.rta-ok   { color: var(--ok-fg); }
+.rta-over { color: var(--over-fg); }
+.rta-none { color: var(--ink-2); }
 
-/* Hidden entirely when no income is logged — "$0.00 left" on an expenses-only
-   month is noise, not information. */
 .net {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
   margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line);
   font-size: 13px; color: var(--ink-2);
 }
-.net .left-amt { font-size: 15px; font-weight: 700; color: var(--ok-fg); }
-.net .left-amt.neg { color: var(--over-fg); }
 
 .banner {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -218,10 +289,13 @@ header select:focus { box-shadow: none; background: none; }
 .banner .btn { padding: 10px 16px; font-size: 14px; white-space: nowrap; }
 
 .bar { height: 6px; border-radius: 3px; background: rgba(28, 31, 88, 0.07); overflow: hidden; margin-top: 12px; }
-.bar > i {
-  display: block; height: 100%; border-radius: 3px;
-  transition: width 420ms cubic-bezier(0.16, 1, 0.3, 1);
-}
+/* No width transition here, and that's deliberate. It used to have one, and it
+   had never once fired: render() replaces innerHTML, so this element is always
+   brand new and a transition needs a value to change FROM. Making it work with
+   @starting-style is easy and wrong -- every refresh rebuilds these, so the
+   bars would replay their fill on every keystroke-commit of an assigned amount.
+   An animation you see that often stops being feedback and becomes noise. */
+.bar > i { display: block; height: 100%; border-radius: 3px; }
 
 .rows { border-radius: var(--r-card); background: var(--surface); overflow: hidden; box-shadow: 0 1px 2px rgba(28, 31, 88, 0.04), 0 8px 24px rgba(28, 31, 88, 0.04); }
 .rows > * + * { border-top: 1px solid var(--line); }
@@ -246,6 +320,15 @@ header select:focus { box-shadow: none; background: none; }
 .f-close { background: var(--close-fg); }
 .f-over  { background: var(--over-fg); }
 .f-none  { background: var(--none-fg); }
+/* The category bar is pace, not a verdict — the pill next to it is the verdict.
+   See the comment on the category render for why this one isn't allowed a colour. */
+.f-neutral { background: rgba(84, 91, 254, 0.55); }
+
+/* The assigned box sits in the row, not behind a sheet: assigning is the thing
+   you came to do, and a tap-to-open-a-sheet per category makes a month of it. */
+.assign-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.assign-row label { margin-bottom: 0; flex: none; }
+input.assign { width: 106px; flex: none; text-align: right; }
 
 .txn { display: flex; align-items: center; gap: 12px; }
 .txn .body { flex: 1; min-width: 0; }
@@ -256,11 +339,52 @@ header select:focus { box-shadow: none; background: none; }
   border-radius: 50%;
   color: var(--ink-2); font-size: 20px;
   display: grid; place-items: center;
-  transition: background 140ms, color 140ms;
+  transition: transform var(--t-press) var(--ease-out),
+              background-color var(--t-press) ease,
+              color var(--t-press) ease;
 }
-.txn .del:hover, .rec-edit .del:hover, .cat-edit .del:hover { background: var(--over-bg); color: var(--over-fg); }
+/* The :hover for these lives in the gated hover block up in controls. */
 
 .income-amt { color: var(--ok-fg); font-weight: 700; }
+
+/* Transaction flags: YNAB's six colours, a small dot at the row's leading edge. */
+:root {
+  --flag-red:#E0524A; --flag-orange:#E8863B; --flag-yellow:#E8C23B;
+  --flag-green:#5AA84B; --flag-blue:#4B7BE5; --flag-purple:#8A5CD6;
+}
+.flag-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+/* Category group header, a quiet band inside the rows list. */
+.group-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 12px 16px 8px;
+  font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  /* Darker than --ink-2: the tinted band drags --ink-2 to 4.35:1, under AA. */
+  color: #43466B;
+  background: rgba(28, 31, 88, 0.025);
+}
+.group-head .num { font-size: 12px; letter-spacing: 0; text-transform: none; }
+
+/* Auto-assign modes sheet: a stacked list of full-width, left-aligned choices. */
+.aa-modes { display: flex; flex-direction: column; gap: 8px; }
+.aa-modes .btn-quiet { display: block; width: 100%; text-align: left; }
+
+/* The group field in a manage-category row wraps to its own full-width line. */
+.cat-edit { flex-wrap: wrap; }
+.cat-edit input.cat-group { flex: 0 0 100%; }
+
+/* Bottom of the page, quiet, and nowhere near the header where the budget
+   switcher lives. Deleting a budget is not a thing to put a thumb's width from
+   switching to one. */
+.danger-zone { margin-top: 34px; text-align: center; }
+.btn-danger {
+  color: var(--over-fg);
+  font-size: 13px; font-weight: 600;
+  padding: 12px 18px; min-height: var(--tap);
+  border-radius: var(--r-ctl);
+  transition: transform var(--t-press) var(--ease-out),
+              background-color var(--t-press) ease;
+}
 
 .empty { padding: 34px 16px; text-align: center; color: var(--ink-2); font-size: 14px; }
 .empty-state { text-align: center; padding: 40px 20px; margin-top: 20px; }
@@ -288,16 +412,63 @@ header select:focus { box-shadow: none; background: none; }
 
 /* ---------------------------------------------------------------- sheets */
 
+/* The sheets used to appear and vanish with no transition whatsoever, which
+   reads as the app glitching rather than as a panel opening. A sheet that slides
+   from the bottom edge also explains where it came from and where a dismiss
+   sends it back to -- the grabber above already promises that, so the motion has
+   to agree with it.
+   translateY(100%) rather than a pixel value: it's the sheet's own height, so it
+   parks exactly off-screen whatever ends up inside it.
+   display + overlay with allow-discrete are what let a [open]-toggled <dialog>
+   animate OUT at all; without them the close is instant. Unsupported browsers
+   just get today's behaviour -- appear, disappear -- so this degrades to par. */
 dialog {
   border: none; padding: 0; background: none;
   width: 100%; max-width: 640px;
   margin: auto auto 0;
   color: var(--ink);
+
+  /* Closed / exiting. Faster than the enter: the user has already decided, and
+     the system should get out of the way. */
+  opacity: 0;
+  transform: translateY(100%);
+  transition:
+    opacity   220ms var(--ease-out),
+    transform 220ms var(--ease-out),
+    display   220ms allow-discrete,
+    overlay   220ms allow-discrete;
 }
+dialog[open] {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity   340ms var(--ease-drawer),
+    transform 340ms var(--ease-drawer),
+    display   340ms allow-discrete,
+    overlay   340ms allow-discrete;
+}
+@starting-style {
+  dialog[open] { opacity: 0; transform: translateY(100%); }
+}
+
 dialog::backdrop {
-  background: rgba(28, 31, 88, 0.28);
+  background: rgba(28, 31, 88, 0);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+  transition:
+    background 220ms var(--ease-out),
+    display    220ms allow-discrete,
+    overlay    220ms allow-discrete;
+}
+dialog[open]::backdrop {
+  background: rgba(28, 31, 88, 0.28);
+  transition:
+    background 340ms var(--ease-drawer),
+    display    340ms allow-discrete,
+    overlay    340ms allow-discrete;
+}
+@starting-style {
+  dialog[open]::backdrop { background: rgba(28, 31, 88, 0); }
 }
 
 .sheet {
@@ -309,6 +480,9 @@ dialog::backdrop {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 -8px 40px rgba(28, 31, 88, 0.12);
   max-height: 88vh;
   overflow-y: auto;
+  /* Scrolling to the end of a long category list shouldn't hand the scroll to
+     the page underneath and drag the whole app around behind the sheet. */
+  overscroll-behavior: contain;
 }
 
 /* iOS drag indicator. Pure CSS — no markup needed for something decorative. */
@@ -325,8 +499,32 @@ dialog::backdrop {
 .sheet-actions { display: flex; gap: 10px; margin-top: 20px; }
 .sheet-actions .btn, .sheet-actions .btn-quiet { flex: 1; }
 
+/* On a wide screen this stops being a bottom sheet and becomes a centred modal,
+   so the motion has to change with it: a centred dialog isn't anchored to the
+   bottom edge and sliding up from off-screen would be a lie about where it came
+   from. It scales from its own centre instead. Never from scale(0) -- nothing
+   real appears out of literally nothing. */
 @media (min-width: 641px) {
-  dialog { margin: auto; }
+  dialog {
+    margin: auto;
+    transform: scale(0.96);
+    transition:
+      opacity   180ms var(--ease-out),
+      transform 180ms var(--ease-out),
+      display   180ms allow-discrete,
+      overlay   180ms allow-discrete;
+  }
+  dialog[open] {
+    transform: scale(1);
+    transition:
+      opacity   220ms var(--ease-out),
+      transform 220ms var(--ease-out),
+      display   220ms allow-discrete,
+      overlay   220ms allow-discrete;
+  }
+  @starting-style {
+    dialog[open] { opacity: 0; transform: scale(0.96); }
+  }
   .sheet { border-radius: 22px; }
 }
 
@@ -349,6 +547,18 @@ dialog::backdrop {
 .login { min-height: 100svh; display: grid; place-content: center; text-align: center; gap: 6px; padding: 24px; }
 .login p { color: var(--ink-2); margin-bottom: 22px; max-width: 34ch; }
 
+/* Reduce Motion asks for less movement, not for nothing. Killing every
+   transition (what this used to do) throws away the fades and colour changes
+   that explain what just happened, and a sheet that teleports in is exactly the
+   jarring change the setting exists to prevent. So: all motion through space
+   goes, opacity and colour stay. */
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
+  * { animation: none !important; }
+  .btn:active, .btn-quiet:active, .icon-btn:active,
+  .btn-danger:active, .del:active, .month button:active { transform: none !important; }
+  .fab:active { transform: translateX(-50%) !important; }
+  dialog, dialog[open] { transform: none !important; }
+  @starting-style {
+    dialog[open] { transform: none !important; }
+  }
 }

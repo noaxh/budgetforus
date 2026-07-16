@@ -25,7 +25,9 @@
 <div class="wrap" id="app" hidden>
   <header>
     <select id="budget-switch" aria-label="Budget"></select>
+    <button class="btn-quiet icon-btn" id="rename-budget" aria-label="Rename budget" title="Rename budget" hidden>&#9998;</button>
     <button class="btn-quiet icon-btn" id="new-budget" aria-label="New budget" title="New budget">+</button>
+    <button class="btn-quiet icon-btn" id="hide-amounts" aria-label="Hide amounts" aria-pressed="false" title="Hide amounts">&#128065;</button>
     <button class="btn-quiet" id="signout">Sign out</button>
   </header>
 
@@ -57,9 +59,16 @@
 
     <div class="section-head">
       <h2>Transactions <span class="small muted" id="txn-count"></span></h2>
-      <button class="btn-quiet" id="manage-rec">Recurring</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-quiet" id="export-csv">Export</button>
+        <button class="btn-quiet" id="manage-rec">Recurring</button>
+      </div>
     </div>
     <div class="rows" id="transactions"></div>
+
+    <div class="danger-zone">
+      <button class="btn-danger" id="del-budget">Delete this budget</button>
+    </div>
   </div>
 </div>
 
@@ -81,15 +90,29 @@
     </div>
     <div class="field">
       <label for="t-desc">Description</label>
-      <input type="text" id="t-desc" maxlength="120" placeholder="Groceries at Metro">
+      <input type="text" id="t-desc" maxlength="120" placeholder="Groceries at Metro" list="payee-list" autocomplete="off">
     </div>
     <div class="field">
       <label for="t-cat">Category</label>
       <select id="t-cat"></select>
     </div>
-    <div class="field">
-      <label for="t-date">Date</label>
-      <input type="date" id="t-date" required>
+    <div class="row-2">
+      <div class="field" style="margin-top:0">
+        <label for="t-date">Date</label>
+        <input type="date" id="t-date" required>
+      </div>
+      <div class="field" style="margin-top:0">
+        <label for="t-flag">Flag</label>
+        <select id="t-flag">
+          <option value="">None</option>
+          <option value="red">🔴 Red</option>
+          <option value="orange">🟠 Orange</option>
+          <option value="yellow">🟡 Yellow</option>
+          <option value="green">🟢 Green</option>
+          <option value="blue">🔵 Blue</option>
+          <option value="purple">🟣 Purple</option>
+        </select>
+      </div>
     </div>
     <p class="small" id="txn-err" style="color:var(--over-fg);margin-top:12px" hidden></p>
     <div class="sheet-actions">
@@ -104,11 +127,12 @@
     <div class="sheet-head"><h2>Categories</h2></div>
     <form id="cat-add" class="cat-edit">
       <input type="text" id="c-name" placeholder="New category" maxlength="40" required aria-label="Category name">
-      <input type="number" id="c-limit" placeholder="Limit" inputmode="decimal" step="0.01" min="0" aria-label="Monthly limit">
+      <input type="number" id="c-limit" placeholder="Target" inputmode="decimal" step="0.01" min="0" aria-label="Monthly target">
       <button type="submit" class="btn" style="padding:10px 14px">Add</button>
+      <input type="text" id="c-group" class="cat-group" placeholder="Group (optional)" maxlength="40" list="group-list" autocomplete="off" aria-label="Category group">
     </form>
     <div id="cat-list"></div>
-    <p class="small muted" style="margin-top:14px">A limit of 0 means the category is tracked but never flags.</p>
+    <p class="small muted" style="margin-top:14px">A target is the usual monthly amount. It doesn't assign anything on its own — Auto-assign fills empty categories up to it.</p>
     <div class="sheet-actions">
       <button type="button" class="btn" id="cat-done">Done</button>
     </div>
@@ -157,6 +181,25 @@
     </div>
   </div>
 </dialog>
+
+<dialog id="aa-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Auto-assign</h2></div>
+    <p class="small muted" style="margin-bottom:12px">Fill this month from a rule. It only sets the amounts — you can still edit any of them after.</p>
+    <div class="aa-modes">
+      <button class="btn-quiet" data-aa="target">Fill empty to target</button>
+      <button class="btn-quiet" data-aa="last">Assign last month's amounts</button>
+      <button class="btn-quiet" data-aa="spent">Assign last month's spending</button>
+      <button class="btn-quiet" data-aa="reset">Clear all to zero</button>
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn-quiet" data-aa="cancel" style="flex:1">Cancel</button>
+    </div>
+  </div>
+</dialog>
+
+<datalist id="payee-list"></datalist>
+<datalist id="group-list"></datalist>
 
 <script type="module" src="app.js"></script>
 </body>
