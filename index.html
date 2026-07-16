@@ -59,8 +59,10 @@
 
     <div class="section-head">
       <h2>Transactions <span class="small muted" id="txn-count"></span></h2>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn-quiet" id="sel-toggle">Select</button>
         <button class="btn-quiet" id="export-csv">Export</button>
+        <button class="btn-quiet" id="manage-moves">Moves</button>
         <button class="btn-quiet" id="manage-rec">Recurring</button>
       </div>
     </div>
@@ -73,6 +75,16 @@
 </div>
 
 <button class="btn fab" id="add-btn" hidden>Add transaction</button>
+
+<div class="bulk-bar glass" id="bulk-bar" hidden>
+  <span class="num" id="bulk-count">0 selected</span>
+  <div class="bulk-acts">
+    <button class="btn-quiet" data-bulk="cat">Categorize</button>
+    <button class="btn-quiet" data-bulk="flag">Flag</button>
+    <button class="btn-quiet bulk-del" data-bulk="delete">Delete</button>
+    <button class="btn-quiet" data-bulk="cancel">Cancel</button>
+  </div>
+</div>
 
 <dialog id="txn-dialog">
   <form class="sheet" method="dialog" id="txn-form">
@@ -153,8 +165,34 @@
           <input type="number" id="r-amount" inputmode="decimal" step="0.01" min="0.01" required>
         </div>
         <div class="field" style="margin-top:0">
+          <label for="r-cadence">Repeats</label>
+          <select id="r-cadence">
+            <option value="monthly">Monthly</option>
+            <option value="weekly">Weekly</option>
+            <option value="every_n">Every N months</option>
+          </select>
+        </div>
+      </div>
+      <div class="row-2">
+        <div class="field" style="margin-top:0" id="r-day-wrap">
           <label for="r-day">Day of month</label>
-          <input type="number" id="r-day" inputmode="numeric" min="1" max="31" value="1" required>
+          <input type="number" id="r-day" inputmode="numeric" min="1" max="31" value="1">
+        </div>
+        <div class="field" style="margin-top:0" id="r-dow-wrap" hidden>
+          <label for="r-dow">Day of week</label>
+          <select id="r-dow">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3">Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+          </select>
+        </div>
+        <div class="field" style="margin-top:0" id="r-interval-wrap" hidden>
+          <label for="r-interval">Every how many months</label>
+          <input type="number" id="r-interval" inputmode="numeric" min="1" max="60" value="2">
         </div>
       </div>
       <div class="row-2">
@@ -170,6 +208,7 @@
           <select id="r-cat"></select>
         </div>
       </div>
+      <label class="rec-auto"><input type="checkbox" id="r-auto"> Add automatically when a month opens</label>
       <div class="sheet-actions">
         <button type="submit" class="btn">Add rule</button>
       </div>
@@ -195,6 +234,43 @@
     </div>
     <div class="sheet-actions">
       <button type="button" class="btn-quiet" data-aa="cancel" style="flex:1">Cancel</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="moves-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Money Moves</h2></div>
+    <p class="small muted" style="margin-bottom:12px">Every change to a category's assigned amount, newest first. A read-only trail.</p>
+    <div id="moves-list"></div>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="moves-done">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="bulk-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2 id="bulk-title">Selected</h2></div>
+    <div class="field" id="bulk-cat-field" hidden>
+      <label for="bulk-cat">Category</label>
+      <select id="bulk-cat"></select>
+    </div>
+    <div class="field" id="bulk-flag-field" hidden>
+      <label for="bulk-flag">Flag</label>
+      <select id="bulk-flag">
+        <option value="">None</option>
+        <option value="red">🔴 Red</option>
+        <option value="orange">🟠 Orange</option>
+        <option value="yellow">🟡 Yellow</option>
+        <option value="green">🟢 Green</option>
+        <option value="blue">🔵 Blue</option>
+        <option value="purple">🟣 Purple</option>
+      </select>
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn-quiet" id="bulk-cancel" style="flex:1">Cancel</button>
+      <button type="button" class="btn" id="bulk-apply">Apply</button>
     </div>
   </div>
 </dialog>

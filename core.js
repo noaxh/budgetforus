@@ -30,6 +30,42 @@ export const recurringDate = (d, day) => {
 // Previous month's 1st, for the "last month" auto-assign modes.
 export const prevMonthStart = ms => { const d = new Date(ms + 'T00:00'); d.setMonth(d.getMonth() - 1); return monthStart(d) }
 
+// Every date a recurring rule lands on within the month `ms` ('YYYY-MM-01'), as
+// 'YYYY-MM-DD' strings. One function drives all three cadences so pending-detect,
+// "Add them", and auto-apply all agree on what a rule is due for:
+//   monthly  -> the anchor day, once
+//   every_n  -> the anchor day, but only on months a whole interval from the
+//               rule's creation month (so a quarterly bill skips the between months)
+//   weekly   -> every matching weekday in the month (the one cadence that is
+//               many-per-month, which is why callers must match on date, not rule)
+// ponytail: every_n is anchored on created_at's month, not a user-picked start, so
+// "every 2 months" means the odd/even months relative to when the rule was made.
+export function recurringOccurrences(rule, ms) {
+  const [y, m] = ms.split('-').map(Number)              // m is 1-12
+  const first = new Date(y, m - 1, 1)
+  switch (rule.cadence || 'monthly') {
+    case 'weekly': {
+      if (rule.day_of_week == null) return []
+      const last = new Date(y, m, 0).getDate()
+      const out = []
+      for (let d = 1; d <= last; d++) {
+        if (new Date(y, m - 1, d).getDay() === rule.day_of_week)
+          out.push(`${ms.slice(0, 8)}${String(d).padStart(2, '0')}`)
+      }
+      return out
+    }
+    case 'every_n': {
+      const n = rule.interval_months || 1
+      const anchor = (rule.created_at || ms).slice(0, 7)  // 'YYYY-MM'
+      const [ay, am] = anchor.split('-').map(Number)
+      const diff = (y - ay) * 12 + (m - am)
+      return diff >= 0 && diff % n === 0 ? [recurringDate(first, rule.day_of_month)] : []
+    }
+    default:
+      return [recurringDate(first, rule.day_of_month)]
+  }
+}
+
 // A category's expenses within [from, to] inclusive, in cents. The date window is
 // the only thing here that can be quietly wrong, so it carries a selftest.
 export const sumSpentInRange = (history, id, from, to) =>
@@ -174,6 +210,17 @@ if (location.search.includes('selftest')) {
 
   eq(prevMonthStart('2026-07-01'), '2026-06-01', 'previous month')
   eq(prevMonthStart('2026-01-01'), '2025-12-01', 'previous month crosses the year')
+
+  const occ = (r, ms) => recurringOccurrences(r, ms).join(',')
+  eq(occ({ cadence: 'monthly', day_of_month: 15 }, '2026-07-01'), '2026-07-15', 'monthly lands once on its day')
+  eq(occ({ cadence: 'monthly', day_of_month: 31 }, '2026-02-01'), '2026-02-28', 'monthly clamps the day to month end')
+  eq(occ({ cadence: 'weekly', day_of_week: 1 }, '2026-07-01'), '2026-07-06,2026-07-13,2026-07-20,2026-07-27', 'weekly hits every matching weekday (Mondays)')
+  eq(occ({ cadence: 'weekly', day_of_week: null }, '2026-07-01'), '', 'weekly with no weekday lands nowhere')
+  // Anchored on created_at month 2026-07: every 3rd month is Jul, Oct, ...
+  eq(occ({ cadence: 'every_n', interval_months: 3, day_of_month: 1, created_at: '2026-07-10' }, '2026-07-01'), '2026-07-01', 'every_n fires on its anchor month')
+  eq(occ({ cadence: 'every_n', interval_months: 3, day_of_month: 1, created_at: '2026-07-10' }, '2026-08-01'), '', 'every_n skips a between month')
+  eq(occ({ cadence: 'every_n', interval_months: 3, day_of_month: 1, created_at: '2026-07-10' }, '2026-10-01'), '2026-10-01', 'every_n fires again one interval on')
+  eq(occ({ cadence: 'every_n', interval_months: 2, day_of_month: 1, created_at: '2026-07-10' }, '2026-06-01'), '', 'every_n never fires before it was created')
   const SP = [
     { category_id: 'g', kind: 'expense', amount: 10, occurred_on: '2026-06-15' },
     { category_id: 'g', kind: 'expense', amount: 5,  occurred_on: '2026-07-02' },

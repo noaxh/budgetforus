@@ -1,7 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
-  recurringDate, prevMonthStart, sumSpentInRange, rollup
+  prevMonthStart, sumSpentInRange, rollup, recurringOccurrences
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -15,7 +15,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set() }
 const $ = id => document.getElementById(id)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
@@ -60,10 +60,40 @@ async function loadMonth() {
   state.assigns = a.data ?? []
 }
 
-// Rules with no transaction yet in the month on screen.
+// Rule occurrences due in the month on screen that have no transaction yet, as
+// {rule, date} pairs. Occurrence-level, not rule-level: a weekly rule is due
+// several times a month, so "applied" has to match on the exact date, not just
+// the rule id. An inactive rule is due for nothing.
 const pendingRecurring = () => {
-  const applied = new Set(state.txns.map(t => t.recurring_id).filter(Boolean))
-  return state.recurring.filter(r => !applied.has(r.id))
+  const ms = monthStart(state.month)
+  const have = new Set(state.txns.filter(t => t.recurring_id).map(t => `${t.recurring_id}|${t.occurred_on}`))
+  const out = []
+  for (const r of state.recurring) {
+    if (r.active === false) continue
+    for (const date of recurringOccurrences(r, ms))
+      if (!have.has(`${r.id}|${date}`)) out.push({ rule: r, date })
+  }
+  return out
+}
+
+// Build the transaction rows for a set of {rule, date} pending occurrences.
+const recurringRows = pend => pend.map(({ rule: r, date }) => ({
+  budget_id: state.budgetId, kind: r.kind, amount: r.amount,
+  description: r.description, category_id: r.category_id, occurred_on: date, recurring_id: r.id
+}))
+
+// Auto-apply: opt-in rules add themselves the first time a month (current or
+// past, never a future month you're only browsing) is opened. Idempotent via the
+// same unique index "Add them" leans on, so re-running on every refresh is safe
+// and cheap -- it only writes when something is genuinely still due.
+async function maybeAutoApply() {
+  if (monthStart(state.month) > monthStart(new Date())) return false
+  const rows = recurringRows(pendingRecurring().filter(p => p.rule.auto_apply))
+  if (!rows.length) return false
+  const { error } = await sb.from('transactions')
+    .upsert(rows, { onConflict: 'recurring_id,occurred_on', ignoreDuplicates: true })
+  if (error) { fail(error); return false }
+  return true
 }
 
 const fail = e => { console.error(e); alert(e.message ?? String(e)) }
@@ -239,19 +269,34 @@ function render() {
 
   $('txn-count').textContent = state.txns.length ? `${state.txns.length}` : ''
   const catName = id => state.cats.find(c => c.id === id)?.name ?? 'Uncategorized'
+  // In select mode the row leads with a checkbox and the body toggles selection
+  // instead of opening the editor; the per-row delete gives way to the bulk bar.
+  const sel = state.selMode
   $('transactions').innerHTML = state.txns.length ? state.txns.map(t => `
-    <div class="row txn">
+    <div class="row txn${sel && state.sel.has(t.id) ? ' selected' : ''}">
+      ${sel ? `<span class="check" aria-hidden="true">${state.sel.has(t.id) ? '&#10003;' : ''}</span>` : ''}
       ${t.flag ? `<span class="flag-dot" style="background:var(--flag-${t.flag})" title="Flag: ${t.flag}"></span>` : ''}
-      <div class="body" data-edit="${t.id}" style="cursor:pointer">
+      <div class="body" ${sel ? `data-sel="${t.id}"` : `data-edit="${t.id}"`} style="cursor:pointer">
         <div class="desc">${esc(t.description) || '<span class="muted">No description</span>'}</div>
         <div class="small muted">${t.occurred_on} &middot; ${esc(catName(t.category_id))}${t.recurring_id ? ' &middot; recurring' : ''}</div>
       </div>
       <span class="num ${t.kind === 'income' ? 'income-amt' : ''}">${t.kind === 'income' ? '+' : ''}${money(cents(t.amount))}</span>
-      <button class="del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>
+      ${sel ? '' : `<button class="del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>`}
     </div>`).join('') : '<div class="empty">Nothing logged this month.</div>'
+
+  // Bulk bar reflects the current selection; the Select toggle flips its label.
+  // The bar and the FAB share the bottom-centre slot, so only one shows at a time.
+  $('bulk-bar').hidden = !sel
+  $('add-btn').hidden = sel
+  $('sel-toggle').textContent = sel ? 'Done' : 'Select'
+  if (sel) $('bulk-count').textContent = `${state.sel.size} selected`
 }
 
-async function refresh() { await loadMonth(); render() }
+async function refresh() {
+  await loadMonth()
+  if (await maybeAutoApply()) await loadMonth()  // reload so the fresh rows show
+  render()
+}
 
 // ---------------------------------------------------------------- auth
 
@@ -291,8 +336,10 @@ sb.auth.onAuthStateChange(async (_e, session) => {
 
 // ---------------------------------------------------------------- events
 
-$('prev').onclick = () => { state.month = new Date(state.month.getFullYear(), state.month.getMonth() - 1, 1); refresh() }
-$('next').onclick = () => { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + 1, 1); refresh() }
+// Leaving the month clears any selection: its ids belong to the month you left.
+const goMonth = delta => { if (state.selMode) { state.selMode = false; state.sel.clear() } state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh() }
+$('prev').onclick = () => goMonth(-1)
+$('next').onclick = () => goMonth(1)
 
 // Two people, one budget: re-fetch when the tab comes back into view so a
 // partner's changes show up. ponytail: focus refresh, not a Supabase Realtime
@@ -322,6 +369,7 @@ $('hide-amounts').onclick = () => {
 applyHide(localStorage.getItem(HIDE_KEY) === '1')
 
 $('budget-switch').onchange = async e => {
+  state.selMode = false; state.sel.clear()
   state.budgetId = e.target.value
   await refresh()
 }
@@ -390,6 +438,12 @@ $('export-csv').onclick = () => {
 }
 
 $('transactions').onclick = async e => {
+  const pick = e.target.closest('[data-sel]')
+  if (pick) {
+    const id = pick.dataset.sel
+    state.sel.has(id) ? state.sel.delete(id) : state.sel.add(id)
+    return render()
+  }
   const del = e.target.closest('[data-del]')
   if (del) {
     if (!confirm('Delete this transaction?')) return
@@ -407,8 +461,20 @@ $('transactions').onclick = async e => {
 // assigns something, and "assigned nothing" and "never assigned" spend the same.
 async function assign(rows) {
   if (!rows.length) return
+  // Money Moves: record from -> to for every row that actually changes, reading
+  // the "from" out of the assignments already in state. ponytail: state can be a
+  // beat stale under two editors, so a move's from-amount is best-effort, not a
+  // ledger you'd audit -- it's a trail of what changed, not double-entry.
+  const currentAssigned = (catId, month) =>
+    state.assigns.find(a => a.category_id === catId && a.month === month)?.amount ?? 0
+  const moves = rows
+    .map(r => ({ budget_id: r.budget_id, category_id: r.category_id, month: r.month,
+                 from_amount: Number(currentAssigned(r.category_id, r.month)), to_amount: Number(r.amount) }))
+    .filter(m => m.from_amount !== m.to_amount)
+
   const { error } = await sb.from('assignments').upsert(rows, { onConflict: 'category_id,month' })
   if (error) return fail(error)
+  if (moves.length) await sb.from('money_moves').insert(moves)  // trail, not a gate
   refresh()
 }
 
@@ -573,36 +639,60 @@ $('cat-list').onclick = async e => {
 
 $('manage-rec').onclick = () => {
   $('r-cat').innerHTML = catOptions(null)
+  syncRecCadence()
   renderRec()
   $('rec-dialog').showModal()
 }
 $('rec-done').onclick = () => { $('rec-dialog').close(); refresh() }
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const cadenceLabel = r =>
+  r.cadence === 'weekly'  ? `every ${WEEKDAYS[r.day_of_week] ?? '?'}`
+  : r.cadence === 'every_n' ? `every ${r.interval_months} month${r.interval_months === 1 ? '' : 's'}, day ${r.day_of_month}`
+  : `monthly, day ${r.day_of_month}`
 
 function renderRec() {
   $('rec-list').innerHTML = state.recurring.length ? state.recurring.map(r => `
     <div class="rec-edit">
       <div class="body">
         <div class="desc">${esc(r.description)}</div>
-        <div class="small muted">day ${r.day_of_month} &middot; ${r.kind}${r.category_id ? ` &middot; ${esc(state.cats.find(c => c.id === r.category_id)?.name ?? '')}` : ''}</div>
+        <div class="small muted">${cadenceLabel(r)} &middot; ${r.kind}${r.auto_apply ? ' &middot; auto' : ''}${r.category_id ? ` &middot; ${esc(state.cats.find(c => c.id === r.category_id)?.name ?? '')}` : ''}</div>
       </div>
       <span class="num ${r.kind === 'income' ? 'income-amt' : ''}">${r.kind === 'income' ? '+' : ''}${money(cents(r.amount))}</span>
       <button class="del" data-delrec="${r.id}" aria-label="Delete rule" style="font-size:18px;color:var(--ink-2);padding:4px 8px">&times;</button>
     </div>`).join('') : '<div class="empty">No rules yet.</div>'
 }
 
+// The day-of-month and weekday inputs are mutually exclusive: weekly uses the
+// weekday, the others use the day. Toggle which is visible from the cadence.
+function syncRecCadence() {
+  const c = $('r-cadence').value
+  $('r-day-wrap').hidden = c === 'weekly'
+  $('r-dow-wrap').hidden = c !== 'weekly'
+  $('r-interval-wrap').hidden = c !== 'every_n'
+}
+
+$('r-cadence').onchange = syncRecCadence
+
 $('rec-add').onsubmit = async e => {
   e.preventDefault()
   if (!state.budgetId) return fail(new Error('Create a budget first.'))
+  const cadence = $('r-cadence').value
   const { error } = await sb.from('recurring').insert({
-    budget_id:    state.budgetId,
-    kind:         $('r-kind').value,
-    amount:       Number($('r-amount').value),
-    description:  $('r-desc').value.trim(),
-    category_id:  $('r-cat').value || null,
-    day_of_month: Number($('r-day').value)
+    budget_id:       state.budgetId,
+    kind:            $('r-kind').value,
+    amount:          Number($('r-amount').value),
+    description:     $('r-desc').value.trim(),
+    category_id:     $('r-cat').value || null,
+    cadence,
+    day_of_month:    Number($('r-day').value) || 1,
+    day_of_week:     cadence === 'weekly' ? Number($('r-dow').value) : null,
+    interval_months: cadence === 'every_n' ? Number($('r-interval').value) || 1 : 1,
+    auto_apply:      $('r-auto').checked
   })
   if (error) return fail(error)
   $('r-desc').value = ''; $('r-amount').value = ''; $('r-day').value = '1'
+  $('r-interval').value = '2'; $('r-auto').checked = false
   await loadMonth(); renderRec(); render()
 }
 
@@ -616,15 +706,7 @@ $('rec-list').onclick = async e => {
 }
 
 $('apply-rec').onclick = async () => {
-  const rows = pendingRecurring().map(r => ({
-    budget_id:   state.budgetId,
-    kind:        r.kind,
-    amount:      r.amount,
-    description: r.description,
-    category_id: r.category_id,
-    occurred_on: recurringDate(state.month, r.day_of_month),
-    recurring_id: r.id
-  }))
+  const rows = recurringRows(pendingRecurring())
   if (!rows.length) return
   // ignoreDuplicates leans on the unique index: if we both press this at the same
   // moment, the loser's rows are skipped rather than charging rent twice.
@@ -633,3 +715,77 @@ $('apply-rec').onclick = async () => {
   if (error) return fail(error)
   refresh()
 }
+
+// ---------------------------------------------------------------- money moves
+
+// The assignment trail, loaded lazily when opened rather than on every month load
+// -- it's history you go looking for, not something the budget view needs. Newest
+// first, capped: a read-only record, no editing, matching the append-only table.
+$('manage-moves').onclick = async () => {
+  const { data, error } = await sb.from('money_moves').select('*')
+    .eq('budget_id', state.budgetId).order('moved_at', { ascending: false }).limit(100)
+  if (error) return fail(error)
+  renderMoves(data ?? [])
+  $('moves-dialog').showModal()
+}
+$('moves-done').onclick = () => $('moves-dialog').close()
+
+function renderMoves(moves) {
+  const dir = (from, to) => Number(to) >= Number(from) ? 'move-up' : 'move-down'
+  $('moves-list').innerHTML = moves.length ? moves.map(m => `
+    <div class="rec-edit">
+      <div class="body">
+        <div class="desc">${esc(state.cats.find(c => c.id === m.category_id)?.name ?? 'Uncategorized')}</div>
+        <div class="small muted">${monthLabel(new Date(m.month + 'T00:00'))} &middot; ${new Date(m.moved_at).toLocaleDateString('en-CA')}</div>
+      </div>
+      <span class="num small ${dir(m.from_amount, m.to_amount)}">${money(cents(m.from_amount))} &rarr; ${money(cents(m.to_amount))}</span>
+    </div>`).join('') : '<div class="empty">No assignment changes logged yet.</div>'
+}
+
+// ---------------------------------------------------------------- bulk actions
+
+// Multi-select over the month's transactions, then categorize / flag / delete the
+// lot in one round-trip. Selection lives in state.sel; render() draws the check
+// column and the bar from it. Leaving select mode always clears the selection so
+// a stale pick can't act on the next month.
+function setSelMode(on) {
+  state.selMode = on
+  state.sel.clear()
+  render()
+}
+$('sel-toggle').onclick = () => setSelMode(!state.selMode)
+
+$('bulk-bar').onclick = e => {
+  const act = e.target.closest('[data-bulk]')?.dataset.bulk
+  if (!act) return
+  if (act === 'cancel') return setSelMode(false)
+  if (!state.sel.size) return
+  if (act === 'delete') return bulkDelete()
+  // categorize / flag both collect a value in the one bulk sheet.
+  $('bulk-title').textContent = act === 'cat' ? 'Categorize selected' : 'Flag selected'
+  $('bulk-cat-field').hidden = act !== 'cat'
+  $('bulk-flag-field').hidden = act !== 'flag'
+  if (act === 'cat') $('bulk-cat').innerHTML = catOptions(null)
+  $('bulk-dialog').dataset.act = act
+  $('bulk-dialog').showModal()
+}
+
+async function bulkDelete() {
+  const ids = [...state.sel]
+  if (!confirm(`Delete ${ids.length} transaction${ids.length === 1 ? '' : 's'}? This can't be undone.`)) return
+  const { error } = await sb.from('transactions').delete().in('id', ids)
+  if (error) return fail(error)
+  setSelMode(false); refresh()
+}
+
+$('bulk-apply').onclick = async () => {
+  const act = $('bulk-dialog').dataset.act
+  const ids = [...state.sel]
+  const patch = act === 'cat'
+    ? { category_id: $('bulk-cat').value || null }
+    : { flag: $('bulk-flag').value || null }
+  const { error } = await sb.from('transactions').update(patch).in('id', ids)
+  if (error) return fail(error)
+  $('bulk-dialog').close(); setSelMode(false); refresh()
+}
+$('bulk-cancel').onclick = () => $('bulk-dialog').close()
