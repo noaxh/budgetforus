@@ -70,7 +70,24 @@ public API.
 
 - **Ponytail applies**: build the laziest thing that actually works. Mark deliberate
   simplifications with a `ponytail:` comment naming the ceiling.
-- Files: `index.html` / `styles.css` / `app.js` / `schema*.sql`. Keep each under 500 lines.
+- Files: `index.html` / `styles.css` / `app.js` / `core.js` / `schema*.sql`. `core.js` is
+  the pure logic (money, dates, `rollup`, and Phase B's targets math): no DOM, no Supabase,
+  exercised by `?selftest`. `app.js` imports from it and holds the Supabase, render, and
+  event glue. Treat ~500 lines per file as a *smell trigger*, not a hard cap (see below).
+
+### When to split a file
+
+- **No build step, ever.** JS splits use native ES modules (`import`/`export`; the entry is
+  already `type="module"`). CSS splits use extra `<link>` tags. Never a bundler.
+- **JS: split when a file crosses ~500 lines AND there is a clean seam** (a cohesive chunk
+  with no dependency on the rest). Extract by responsibility, not to hit a number: pure logic
+  goes to `core.js` and stays testable via `?selftest`; DOM/data/render/event glue stays in
+  `app.js`. Prefer two or three well-separated files over many tiny ones. A 550-line file
+  with no clean seam is fine, leave it.
+- **CSS: do not split by default.** A single well-sectioned `styles.css` is easier to work in
+  than a rule chased across files, and extra `<link>`s add requests plus the stale-cache
+  flakiness seen during preview. Split only past ~800 lines or for a genuinely separate
+  surface (for example a print sheet). If the guideline bites, trim dead rules first.
 - **Mobile is the primary target.** iPhone, Add to Home Screen. Design phone-first:
   44px minimum tap targets, 16px inputs (anything smaller makes iOS zoom the page on focus).
 - **Measure contrast, don't eyeball it.** Translucency silently eats contrast — the glass
