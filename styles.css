@@ -19,7 +19,9 @@
   /* Status. "ok" borrows the brand lime so the good case reads as on-brand
      rather than as generic-success-green. */
   --ok-bg:    rgba(174, 232, 101, 0.30);  --ok-fg:    #2E6B1F;
-  --close-bg: rgba(255, 196, 61, 0.26);   --close-fg: #8A6100;
+  /* Amber = a target set but not yet funded this month (real YNAB underfunded,
+     Phase B). #8A6100 on this tint measures 4.5:1+; do not lighten either. */
+  --under-bg: rgba(255, 196, 61, 0.26);   --under-fg: #8A6100;
   --over-bg:  rgba(224, 49, 49, 0.14);    --over-fg:  #B3261E;
   /* Darker than --ink-2: the pill's own tinted background drags the ratio under
      4.5 at this text size. */
@@ -313,13 +315,27 @@ header select:focus-visible { outline: 2px solid var(--blurple); outline-offset:
 }
 
 .s-ok    { background: var(--ok-bg);    color: var(--ok-fg); }
-.s-close { background: var(--close-bg); color: var(--close-fg); }
+.s-under { background: var(--under-bg); color: var(--under-fg); }
 .s-over  { background: var(--over-bg);  color: var(--over-fg); }
 .s-none  { background: var(--none-bg);  color: var(--none-fg); }
 .f-ok    { background: var(--ok-fg); }
-.f-close { background: var(--close-fg); }
+.f-under { background: var(--under-fg); }
 .f-over  { background: var(--over-fg); }
 .f-none  { background: var(--none-fg); }
+
+/* Target line under a category: the shortfall (muted) or a funded confirmation
+   (amber-green). Only categories with a target render it. */
+.tgt { margin-top: 8px; }
+.tgt-met { color: var(--ok-fg); font-weight: 600; }
+
+/* Cost to Be Me: a small ledger under the Assigned/Spent line. The verdict reads
+   green when income covers the plan, amber when it falls short. */
+.ctbm { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.ctbm-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ctbm-row input { width: 120px; flex: none; text-align: right; }
+.ctbm-verdict { font-weight: 700; }
+.ctbm-verdict.ok    { color: var(--ok-fg); }
+.ctbm-verdict.short { color: var(--under-fg); }
 /* The category bar is pace, not a verdict — the pill next to it is the verdict.
    See the comment on the category render for why this one isn't allowed a colour. */
 .f-neutral { background: rgba(84, 91, 254, 0.55); }
@@ -369,8 +385,11 @@ input.assign { width: 106px; flex: none; text-align: right; }
 .aa-modes { display: flex; flex-direction: column; gap: 8px; }
 .aa-modes .btn-quiet { display: block; width: 100%; text-align: left; }
 
-/* The group field in a manage-category row wraps to its own full-width line. */
+/* Manage-category row: name/amount/delete on the first line, the target kind and
+   its date wrap to a shared second line, the group to a full-width third. */
 .cat-edit { flex-wrap: wrap; }
+.cat-edit .cat-kind { flex: 1 1 45%; min-width: 0; }
+.cat-edit input.cat-due { flex: 1 1 45%; width: auto; min-width: 0; }
 .cat-edit input.cat-group { flex: 0 0 100%; }
 
 /* Bottom of the page, quiet, and nowhere near the header where the budget

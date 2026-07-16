@@ -132,7 +132,7 @@
       <input type="text" id="c-group" class="cat-group" placeholder="Group (optional)" maxlength="40" list="group-list" autocomplete="off" aria-label="Category group">
     </form>
     <div id="cat-list"></div>
-    <p class="small muted" style="margin-top:14px">A target is the usual monthly amount. It doesn't assign anything on its own — Auto-assign fills empty categories up to it.</p>
+    <p class="small muted" style="margin-top:14px">A target is a goal, not an assignment — it colours a category amber until it's funded and drives Auto-assign. <b>Monthly refill</b> tops it up each month; <b>By date</b> saves the amount by a date, split evenly over the months left.</p>
     <div class="sheet-actions">
       <button type="button" class="btn" id="cat-done">Done</button>
     </div>
@@ -188,6 +188,7 @@
     <p class="small muted" style="margin-bottom:12px">Fill this month from a rule. It only sets the amounts — you can still edit any of them after.</p>
     <div class="aa-modes">
       <button class="btn-quiet" data-aa="target">Fill empty to target</button>
+      <button class="btn-quiet" data-aa="fund">Fund all targets to needed</button>
       <button class="btn-quiet" data-aa="last">Assign last month's amounts</button>
       <button class="btn-quiet" data-aa="spent">Assign last month's spending</button>
       <button class="btn-quiet" data-aa="reset">Clear all to zero</button>

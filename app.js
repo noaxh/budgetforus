@@ -1,7 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
-  recurringDate, prevMonthStart, sumSpentInRange, envStatus, rollup
+  recurringDate, prevMonthStart, sumSpentInRange, rollup
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -72,6 +72,11 @@ const fail = e => { console.error(e); alert(e.message ?? String(e)) }
 
 const sumKind = k => state.txns.filter(t => t.kind === k).reduce((s, t) => s + cents(t.amount), 0)
 
+// Expected-income for Cost to Be Me. Per budget, in localStorage: it's a personal
+// what-if, not budget data, so it never touches Supabase or RLS.
+const ctbmKey = () => `ctbm-income-${state.budgetId}`
+const ctbmIncome = () => Number(localStorage.getItem(ctbmKey())) || 0
+
 // Categories still sitting at zero that have a target to fill. Untouched only:
 // overwriting a number someone typed on purpose is not a convenience.
 const unfilledCats = roll =>
@@ -90,6 +95,12 @@ function autoAssignRows(mode, roll) {
     state.assigns.filter(a => a.category_id === id && a.month === prev).reduce((s, a) => s + cents(a.amount), 0) / 100
   switch (mode) {
     case 'target': return unfilledCats(roll).map(c => row(c, c.monthly_limit))
+    // Fund every target to what it needs this month, topping up whatever is
+    // already assigned. 'target' above is the special case of this that only
+    // touches empty envelopes; 'fund' also tops up the partly-assigned ones.
+    // assign() replaces the month's amount, so the new amount is this month's
+    // assignment plus the remaining shortfall.
+    case 'fund':   return state.cats.map(c => { const e = roll.cats.get(c.id); return e && e.needed > 0 ? row(c, (e.assigned + e.needed) / 100) : null }).filter(Boolean)
     case 'last':   return state.cats.map(c => row(c, lastAssigned(c.id))).filter(r => r.amount > 0)
     case 'spent':  return state.cats.map(c => row(c, sumSpentInRange(state.history, c.id, prev, prevEnd) / 100)).filter(r => r.amount > 0)
     case 'reset':  return state.cats.map(c => row(c, 0))
@@ -121,6 +132,30 @@ function render() {
   const assignedNow = state.cats.reduce((s, c) => s + (roll.cats.get(c.id)?.assigned ?? 0), 0)
   const rtaK = roll.rta < 0 ? 'over' : roll.rta > 0 ? 'ok' : 'none'
 
+  // Cost to Be Me: the sum of every target's needed-this-month -- what it costs
+  // to keep every goal on track this month. Compared against an expected-income
+  // figure the user types (kept per budget in localStorage; it isn't budget data,
+  // it's a personal what-if), it answers "does my income cover my plan".
+  const costToBeMe = state.cats.reduce((s, c) => s + (roll.cats.get(c.id)?.needed ?? 0), 0)
+  const hasTargets = state.cats.some(c => c.target_kind)
+  const incomeC = cents(ctbmIncome())
+  const ctbm = hasTargets ? `
+    <div class="ctbm">
+      <div class="ctbm-row">
+        <span class="small muted">Cost to Be Me</span>
+        <span class="num">${money(costToBeMe)}</span>
+      </div>
+      <div class="ctbm-row">
+        <label class="small muted" for="ctbm-income">Expected income</label>
+        <input class="num" id="ctbm-income" type="number" step="0.01" min="0" inputmode="decimal"
+               placeholder="0.00" value="${ctbmIncome() || ''}">
+      </div>
+      ${incomeC > 0 ? `<div class="ctbm-verdict ${incomeC >= costToBeMe ? 'ok' : 'short'} num">${
+        incomeC >= costToBeMe
+          ? `Covered, ${money(incomeC - costToBeMe)} to spare`
+          : `Short ${money(costToBeMe - incomeC)}`}</div>` : ''}
+    </div>` : ''
+
   // Ready to Assign is the hero, because counting it down to zero is the whole
   // method. Spent used to lead here; spent is a fact about the past, and this
   // number is a decision waiting to be made.
@@ -139,7 +174,7 @@ function render() {
     <div class="net">
       <span class="num">Assigned ${money(assignedNow)}</span>
       <span class="num">Spent ${money(totalSpent)}</span>
-    </div>`
+    </div>${ctbm}`
 
   const pend = pendingRecurring()
   $('rec-banner').hidden = !pend.length
@@ -156,11 +191,20 @@ function render() {
   // and a red bar next to a green pill reads as a bug.
   const catRow = c => {
     const e = roll.cats.get(c.id)
-    const k = envStatus(e.available, e.assigned, e.activity)
+    // The target affordance: only categories with a target say anything. Amber
+    // ones name the shortfall (with the due date for by-date goals), funded ones
+    // just confirm it. ponytail: text, not the ring -- the progress ring is the
+    // design-engineer piece and does not gate the money logic.
+    const tgt = c.target_kind
+      ? `<div class="tgt small ${e.needed > 0 ? 'muted' : 'tgt-met'} num">${
+          e.needed > 0
+            ? `${money(e.needed)} to fund${c.target_kind === 'by_date' && c.target_due ? ` by ${c.target_due}` : ''}`
+            : 'Target funded'}</div>`
+      : ''
     return `<div class="row">
       <div class="cat-top">
         <span class="cat-name">${esc(c.name)}</span>
-        <span class="pill s-${k}">${e.available < 0 ? `${money(-e.available)} over` : `${money(e.available)} left`}</span>
+        <span class="pill s-${e.status}">${e.available < 0 ? `${money(-e.available)} over` : `${money(e.available)} left`}</span>
       </div>
       <div class="assign-row">
         <label for="a-${c.id}">Assigned</label>
@@ -169,6 +213,7 @@ function render() {
         <span class="small muted num">${e.spent ? `${money(e.spent)} spent` : 'nothing spent'}</span>
       </div>
       <div class="bar"><i class="f-neutral" style="width:${e.assigned > 0 ? Math.min(100, e.spent / e.assigned * 100) : 0}%"></i></div>
+      ${tgt}
     </div>`
   }
   // Group by group_name. Ungrouped ('') renders first with no header; named
@@ -385,6 +430,16 @@ $('summary').onclick = e => {
   if (e.target.closest('#auto-assign')) $('aa-dialog').showModal()
 }
 
+// Expected-income edits persist and re-render the covered/short verdict. Only a
+// re-render (not a full refresh) is needed -- no budget data changed.
+$('summary').onchange = e => {
+  if (e.target.id !== 'ctbm-income') return
+  const v = Number(e.target.value) || 0
+  if (v > 0) localStorage.setItem(ctbmKey(), String(v))
+  else localStorage.removeItem(ctbmKey())
+  render()
+}
+
 $('aa-dialog').onclick = e => {
   const btn = e.target.closest('[data-aa]')
   if (!btn) return
@@ -444,11 +499,15 @@ $('manage-cats').onclick = () => { renderCats(); $('cat-dialog').showModal() }
 $('cat-done').onclick = () => { $('cat-dialog').close(); refresh() }
 
 function renderCats() {
+  const kindOpts = k => [['', 'No target'], ['monthly', 'Monthly refill'], ['by_date', 'By date']]
+    .map(([v, l]) => `<option value="${v}" ${(k ?? '') === v ? 'selected' : ''}>${l}</option>`).join('')
   $('cat-list').innerHTML = state.cats.map(c => `
     <div class="cat-edit">
       <input type="text" value="${esc(c.name)}" maxlength="40" data-name="${c.id}" aria-label="Name">
-      <input type="number" value="${c.monthly_limit}" step="0.01" min="0" inputmode="decimal" data-limit="${c.id}" aria-label="Monthly target">
+      <input type="number" value="${c.monthly_limit}" step="0.01" min="0" inputmode="decimal" data-limit="${c.id}" aria-label="Target amount">
       <button class="del" data-delcat="${c.id}" aria-label="Delete category" style="font-size:18px;color:var(--ink-2);padding:4px 8px">&times;</button>
+      <select class="cat-kind" data-kind="${c.id}" aria-label="Target kind">${kindOpts(c.target_kind)}</select>
+      <input type="date" class="cat-due" value="${c.target_due ?? ''}" data-due="${c.id}" aria-label="Target date"${c.target_kind === 'by_date' ? '' : ' hidden'}>
       <input type="text" class="cat-group" value="${esc(c.group_name ?? '')}" maxlength="40" list="group-list" placeholder="Group (optional)" data-group="${c.id}" aria-label="Group">
     </div>`).join('')
   $('group-list').innerHTML = [...new Set(state.cats.map(c => c.group_name).filter(Boolean))]
@@ -458,10 +517,14 @@ function renderCats() {
 $('cat-add').onsubmit = async e => {
   e.preventDefault()
   if (!state.budgetId) return fail(new Error('Create a budget first.'))
+  const limit = Number($('c-limit').value) || 0
   const { error } = await sb.from('categories').insert({
     budget_id: state.budgetId,
     name: $('c-name').value.trim(),
-    monthly_limit: Number($('c-limit').value) || 0,
+    monthly_limit: limit,
+    // An amount typed here is a monthly refill target by default (same rule the
+    // migration used to seed existing rows); change the kind in the row below.
+    target_kind: limit > 0 ? 'monthly' : null,
     group_name: $('c-group').value.trim() || null   // kept between adds, so several go to one group
   })
   if (error) return fail(error)
@@ -471,11 +534,16 @@ $('cat-add').onsubmit = async e => {
 
 // Save each field as it changes. ponytail: no dirty tracking, no save button.
 $('cat-list').onchange = async e => {
-  const id = e.target.dataset.name ?? e.target.dataset.limit ?? e.target.dataset.group
+  const d = e.target.dataset
+  const id = d.name ?? d.limit ?? d.kind ?? d.due ?? d.group
   if (!id) return
   let patch
-  if (e.target.dataset.name) { patch = { name: e.target.value.trim() }; if (patch.name === '') return }
-  else if (e.target.dataset.limit) patch = { monthly_limit: Number(e.target.value) || 0 }
+  if (d.name) { patch = { name: e.target.value.trim() }; if (patch.name === '') return }
+  else if (d.limit) patch = { monthly_limit: Number(e.target.value) || 0 }
+  // Changing the kind clears a stale due date when it's no longer a by-date goal,
+  // so an old date can't quietly drive the by-date math after a switch away.
+  else if (d.kind) patch = { target_kind: e.target.value || null, ...(e.target.value === 'by_date' ? {} : { target_due: null }) }
+  else if (d.due) patch = { target_due: e.target.value || null }
   else patch = { group_name: e.target.value.trim() || null }
   const { error } = await sb.from('categories').update(patch).eq('id', id)
   if (error) return fail(error)

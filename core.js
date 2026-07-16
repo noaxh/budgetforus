@@ -36,16 +36,52 @@ export const sumSpentInRange = (history, id, from, to) =>
   history.filter(t => t.category_id === id && t.kind === 'expense' && t.occurred_on >= from && t.occurred_on <= to)
          .reduce((s, t) => s + cents(t.amount), 0)
 
+// ---------------------------------------------------------------- targets
+
+// Whole months from month-start `ms` to a due date, counting both endpoint
+// months, floored at 1. A by-date target funds evenly across these months, so a
+// due date in the current month is one month, not zero.
+// ponytail: whole-month count -- a mid-month due date still funds over the
+// remaining whole months, no day-level proration.
+export const monthsLeft = (ms, due) => {
+  if (!due) return 1
+  const [my, mm] = ms.split('-').map(Number)
+  const [dy, dm] = due.split('-').map(Number)
+  return Math.max(1, (dy - my) * 12 + (dm - mm) + 1)
+}
+
+// Cents a category should have added THIS month to stay on track for its target,
+// or 0 when it has no supported target or the target is already met. `availableC`
+// is the category's cumulative Available; `monthly_limit` is the target amount
+// for whichever kind is set.
+//   monthly  -> refill Available up to the target
+//   by_date  -> save the remaining shortfall evenly over the months left
+// ponytail: only 'monthly' and 'by_date' are built. weekly/setaside/balance are
+// deferred -- the schema (schema-v5) holds them, they become more switch arms
+// here. By-date assumes an even monthly contribution, not front-loading or catch-up.
+export function targetNeeded(cat, availableC, ms) {
+  const targetC = cents(cat.monthly_limit)
+  if (!cat.target_kind || targetC <= 0) return 0
+  const remaining = Math.max(0, targetC - availableC)
+  switch (cat.target_kind) {
+    case 'monthly': return remaining
+    case 'by_date': return Math.ceil(remaining / monthsLeft(ms, cat.target_due))
+    default:        return 0
+  }
+}
+
 // ---------------------------------------------------------------- envelope
 
 // YNAB colours Available and nothing else: red means the envelope is in the
-// hole, green means it holds money, gray means it has never been touched. Amber
-// is the one state we spell differently -- YNAB's means "target not met", ours
-// means "funded and spent to exactly zero", because there is no targets engine.
-export function envStatus(availC, assignedC, activityC) {
+// hole, amber means a target is set but not yet funded this month, green means it
+// holds money with no shortfall, gray means it has never been touched. `neededC`
+// is the category's needed-this-month from targetNeeded (0 when it has no
+// target), which is what finally makes YNAB's real yellow expressible.
+export function envStatus(availC, neededC) {
   if (availC < 0) return 'over'
+  if (neededC > 0) return 'under'
   if (availC > 0) return 'ok'
-  return assignedC === 0 && activityC === 0 ? 'none' : 'close'
+  return 'none'
 }
 
 // The whole model. A category keeps what it doesn't spend, and that one rule is
@@ -107,6 +143,16 @@ export function rollup(cats, assigns, history, ms) {
     }
   }
 
+  // Targets pass: now that every category's cumulative Available is known, give
+  // each one its needed-this-month and a verdict. Everything downstream (the pill
+  // colour, Cost to Be Me, the fill-to-target auto-assign) reads these instead of
+  // recomputing, so there is one place the target math lives.
+  for (const c of cats) {
+    const e = acc.get(c.id)
+    e.needed = targetNeeded(c, e.available, ms)
+    e.status = envStatus(e.available, e.needed)
+  }
+
   return { cats: acc, rta: incomeAll - unassignedSpend - assignedAll }
 }
 
@@ -136,10 +182,23 @@ if (location.search.includes('selftest')) {
   ]
   eq(sumSpentInRange(SP, 'g', '2026-06-01', '2026-06-30'), 1000, 'last-month spend: only that category, that month, expenses only')
 
-  eq(envStatus(-1, 0, 0), 'over', 'a cent in the hole is in the hole')
-  eq(envStatus(5000, 30000, -25000), 'ok', 'money left')
-  eq(envStatus(0, 30000, -30000), 'close', 'funded and spent to zero')
-  eq(envStatus(0, 0, 0), 'none', 'never touched')
+  eq(envStatus(-1, 0), 'over', 'a cent in the hole is in the hole')
+  eq(envStatus(5000, 0), 'ok', 'money left, no shortfall')
+  eq(envStatus(2000, 1000), 'under', 'a target with a shortfall is underfunded')
+  eq(envStatus(0, 0), 'none', 'never touched')
+
+  eq(monthsLeft('2026-07-01', '2026-07-31'), 1, 'due this month is one month')
+  eq(monthsLeft('2026-07-01', '2026-09-15'), 3, 'jul aug sep is three months')
+  eq(monthsLeft('2026-07-01', '2026-05-01'), 1, 'a past due date floors at one month')
+  eq(monthsLeft('2026-01-01', null), 1, 'no due date is one month')
+
+  const MCAT = { target_kind: 'monthly', monthly_limit: 300 }
+  eq(targetNeeded(MCAT, 20000, '2026-07-01'), 10000, 'monthly needs the refill up to target')
+  eq(targetNeeded(MCAT, 30000, '2026-07-01'), 0, 'a met monthly target needs nothing')
+  const DCAT = { target_kind: 'by_date', monthly_limit: 1200, target_due: '2026-09-15' }
+  eq(targetNeeded(DCAT, 0, '2026-07-01'), 40000, 'by-date splits the shortfall over the months left')
+  eq(targetNeeded(DCAT, 120000, '2026-07-01'), 0, 'a met by-date target needs nothing')
+  eq(targetNeeded({ monthly_limit: 300 }, 0, '2026-07-01'), 0, 'a limit with no target kind is not a target')
 
   // The envelope rollup gets checked from both ends -- the month the money was
   // assigned, and a later month it has to roll into. Everything below is the
@@ -158,6 +217,15 @@ if (location.search.includes('selftest')) {
   eq(jul.cats.get('g').activity, -25000, 'spending is negative activity')
   eq(jul.cats.get('g').available, 5000, 'available = assigned - spent')
   eq(jul.cats.get('f').available, 0, 'an untouched category is empty, not broken')
+  eq(jul.cats.get('g').status, 'ok', 'a funded untargeted category is green')
+  eq(jul.cats.get('f').status, 'none', 'an untouched untargeted category is gray')
+
+  // Same $300 assigned and $250 spent (Available 50), now with a $500 monthly
+  // target: still 450 short, so the envelope is amber, not green.
+  const TCATS = [{ id: 'g', target_kind: 'monthly', monthly_limit: 500 }]
+  const tgt = rollup(TCATS, A300, JULY, '2026-07-01')
+  eq(tgt.cats.get('g').needed, 45000, 'a partly-funded target still needs the rest')
+  eq(tgt.cats.get('g').status, 'under', 'a target not yet met is amber')
 
   const aug = rollup(CATS, A300, JULY, '2026-08-01')
   eq(aug.cats.get('g').available, 5000, 'unspent money rolls into next month')
