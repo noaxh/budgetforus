@@ -780,6 +780,35 @@ dialog[open]::backdrop {
 .bd-amt { font-size: var(--fs-meta); font-weight: 700; color: var(--ink-2); flex: none; }
 .bd-bar { height: 8px; border-radius: 4px; background: rgba(32, 40, 42, 0.07); overflow: hidden; }
 .bd-bar > i { display: block; height: 100%; border-radius: 4px; background: rgba(12, 95, 102, 0.55); }
+/* Each row is a button: tap drills through to the register filtered to that
+   category. Reuses the base button reset; just needs block layout + affordance. */
+.bd-row { display: block; width: 100%; text-align: left; border-radius: var(--r-ctl); transition: transform var(--t-press) var(--ease-out); }
+.bd-row:active { transform: scale(0.99); }
+@media (hover: hover) and (pointer: fine) { .bd-row:hover .bd-name { color: var(--brand); } }
+
+/* ---- filter-chip (register drill-through) -------------------------------------------------------
+   KIT: the dismissable chip shown above the register when a Reflect breakdown
+   row filtered it to one category. Tapping the ✕ clears the filter.
+   MARKUP  (render() writes this into #txn-filter)
+     <div class="filter-chip"><span>Groceries</span>
+       <button data-clearfilter aria-label="Clear filter">×</button></div>
+   TOKENS  brand, brand-tint, r-pill, fs-meta */
+#txn-filter:not(:empty) { margin-bottom: var(--s2); }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: var(--s1);
+  background: var(--brand-tint); color: var(--brand);
+  border-radius: var(--r-pill);
+  padding: 5px 5px 5px 14px;
+  font-size: var(--fs-meta); font-weight: 700;
+}
+.filter-chip button {
+  width: 28px; height: 28px; flex: none;
+  border-radius: 50%; color: var(--brand);
+  font-size: 18px; line-height: 1;
+  display: grid; place-items: center;
+  transition: background-color var(--t-press) ease;
+}
+@media (hover: hover) and (pointer: fine) { .filter-chip button:hover { background-color: rgba(12, 95, 102, 0.14); } }
 
 /* ---- banner (recurring due) -------------------------------------------------------------------
    KIT: quiet prompt card with one action. */

@@ -15,7 +15,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set() }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null }
 const $ = id => document.getElementById(id)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
@@ -316,10 +316,21 @@ function render() {
 
   // --- txn-row (kit): the register. In select mode the row leads with a check
   // and the body toggles selection; the per-row delete yields to the bulk bar.
-  $('txn-count').textContent = state.txns.length ? `${state.txns.length}` : ''
   const catName = id => state.cats.find(c => c.id === id)?.name ?? 'Uncategorized'
+  // The register can be drilled through to one category from a Reflect breakdown
+  // row. The filter is a view over the month already loaded — it matches on the
+  // same '__uncat__' bucket key the breakdown uses, and never refetches.
+  const filterName = state.txnFilter === '__uncat__' ? 'Uncategorized'
+    : state.txnFilter ? catName(state.txnFilter) : ''
+  const visibleTxns = state.txnFilter
+    ? state.txns.filter(t => (t.category_id ?? '__uncat__') === state.txnFilter)
+    : state.txns
+  $('txn-filter').innerHTML = state.txnFilter
+    ? `<div class="filter-chip"><span>${esc(filterName)}</span><button data-clearfilter aria-label="Clear ${esc(filterName)} filter">&times;</button></div>`
+    : ''
+  $('txn-count').textContent = visibleTxns.length ? `${visibleTxns.length}` : ''
   const sel = state.selMode
-  $('transactions').innerHTML = state.txns.length ? state.txns.map(t => `
+  $('transactions').innerHTML = visibleTxns.length ? visibleTxns.map(t => `
     <div class="txn-row${sel && state.sel.has(t.id) ? ' selected' : ''}">
       ${sel ? `<span class="check" aria-hidden="true">${state.sel.has(t.id) ? '&#10003;' : ''}</span>` : ''}
       ${t.flag ? `<span class="flag-dot" style="background:var(--flag-${t.flag})" title="Flag: ${t.flag}"></span>` : ''}
@@ -329,7 +340,7 @@ function render() {
       </div>
       <span class="txn-amt num${t.kind === 'income' ? ' txn-in' : ''}">${t.kind === 'income' ? '+' : '&minus;'}${money(cents(t.amount))}</span>
       ${sel ? '' : `<button class="row-del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>`}
-    </div>`).join('') : '<div class="empty">Nothing logged this month.</div>'
+    </div>`).join('') : `<div class="empty">${state.txnFilter ? 'No transactions in ' + esc(filterName) + ' this month.' : 'Nothing logged this month.'}</div>`
 
   // Bulk bar reflects the current selection; the Select toggle flips its label.
   // The bar and the FAB share the floating slot, so only one shows at a time.
@@ -356,8 +367,11 @@ function render() {
     </div>`
 
   // Spending breakdown: the month on screen, expenses by category, largest first,
-  // each bar the category's share of the total.
+  // each bar the category's share of the total. Each row is a button that drills
+  // through to the register filtered to that category (data-bd carries the same
+  // bucket key the filter matches on).
   const bd = spendingBreakdown(state.txns, state.cats)
+  $('reflect-export').hidden = !bd.total
   $('reflect-report').innerHTML = bd.total ? `
     <div class="card breakdown">
       <div class="bd-total">
@@ -366,13 +380,13 @@ function render() {
       </div>
       ${bd.rows.map(r => {
         const pct = Math.round(r.amount / bd.total * 100)
-        return `<div class="bd-row">
+        return `<button class="bd-row" data-bd="${r.id ?? '__uncat__'}">
           <div class="bd-head">
             <span class="bd-name">${esc(r.name)}</span>
             <span class="bd-amt num">${money(r.amount)} &middot; ${pct}%</span>
           </div>
           <div class="bd-bar"><i style="width:${r.amount / bd.total * 100}%"></i></div>
-        </div>`
+        </button>`
       }).join('')}
     </div>` : '<div class="rows"><div class="empty">Nothing spent in ' + esc(monthLabel(state.month)) + ' yet.</div></div>'
 }
@@ -466,7 +480,7 @@ $('categories').addEventListener('click', e => {
 $('accounts').onclick = async e => {
   const b = e.target.closest('[data-acct]')
   if (!b || b.dataset.acct === state.budgetId) return
-  state.selMode = false; state.sel.clear()
+  state.selMode = false; state.sel.clear(); state.txnFilter = null
   state.budgetId = b.dataset.acct
   $('budget-switch').value = state.budgetId
   await refresh()
@@ -475,7 +489,7 @@ $('accounts').onclick = async e => {
 // ---------------------------------------------------------------- events
 
 // Leaving the month clears any selection: its ids belong to the month you left.
-const goMonth = delta => { if (state.selMode) { state.selMode = false; state.sel.clear() } state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh() }
+const goMonth = delta => { if (state.selMode) { state.selMode = false; state.sel.clear() } state.txnFilter = null; state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh() }
 $('prev').onclick = () => goMonth(-1)
 $('next').onclick = () => goMonth(1)
 
@@ -507,7 +521,7 @@ $('hide-amounts').onclick = () => {
 applyHide(localStorage.getItem(HIDE_KEY) === '1')
 
 $('budget-switch').onchange = async e => {
-  state.selMode = false; state.sel.clear()
+  state.selMode = false; state.sel.clear(); state.txnFilter = null
   state.budgetId = e.target.value
   await refresh()
 }
@@ -552,6 +566,7 @@ $('del-budget').onclick = async () => {
   const { error } = await sb.from('budgets').delete().eq('id', b.id)
   if (error) return fail(error)
   state.budgetId = null   // loadBudgets falls back to whatever is left
+  state.txnFilter = null
   await loadBudgets()
   await refresh()
 }
@@ -591,6 +606,40 @@ $('transactions').onclick = async e => {
   }
   const edit = e.target.closest('[data-edit]')
   if (edit) openTxn(state.txns.find(t => t.id === edit.dataset.edit))
+}
+
+// Reflect drill-through: tap a breakdown category to see just its transactions.
+// Sets the register filter (a view over the loaded month), renders it, then jumps
+// to the Accounts tab where the register lives.
+$('reflect-report').onclick = e => {
+  const b = e.target.closest('[data-bd]')
+  if (!b) return
+  state.txnFilter = b.dataset.bd
+  if (state.selMode) { state.selMode = false; state.sel.clear() }  // a stale selection isn't this view's
+  render()
+  switchTab('accounts')
+}
+$('txn-filter').onclick = e => {
+  if (!e.target.closest('[data-clearfilter]')) return
+  state.txnFilter = null
+  render()
+}
+
+// Export the month's spending breakdown (category, spent, share) to CSV. Distinct
+// from the register Export, which dumps raw rows — this is the report summary.
+// Same client-side Blob download, so nothing leaves the browser.
+$('reflect-export').onclick = () => {
+  const bd = spendingBreakdown(state.txns, state.cats)
+  if (!bd.total) return
+  const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const body = bd.rows.map(r =>
+    [r.name, (r.amount / 100).toFixed(2), Math.round(r.amount / bd.total * 100) + '%'].map(cell).join(','))
+  body.push(['Total', (bd.total / 100).toFixed(2), '100%'].map(cell).join(','))
+  const csv = [['category', 'spent', 'share'].join(','), ...body].join('\r\n')
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url; a.download = `budget-${monthKey(state.month)}-spending.csv`; a.click()
+  URL.revokeObjectURL(url)
 }
 
 // ---------------------------------------------------------------- assigning

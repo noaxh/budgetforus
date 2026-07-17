@@ -111,6 +111,9 @@
           <button class="btn-quiet" id="manage-rec">Recurring</button>
         </div>
       </div>
+      <!-- txn-filter: render() fills this with a dismissable chip when a Reflect
+           drill-through has filtered the register to one category. -->
+      <div id="txn-filter"></div>
       <!-- register (kit: .txn-row). OPUS: Phase E adds account / cleared
            columns to these rows — extend the .txn-meta line, don't add cells. -->
       <div class="rows" id="transactions"></div>
@@ -132,6 +135,7 @@
     <section class="screen" id="screen-reflect" data-screen="reflect" hidden>
       <div class="section-head">
         <h2>Reflect <span class="small muted" id="reflect-sub"></span></h2>
+        <button class="btn-quiet" id="reflect-export" hidden>Export</button>
       </div>
       <!-- cashflow (kit): render() fills this with income vs expense + net for
            the month on screen. The overview card; the breakdown below is the
