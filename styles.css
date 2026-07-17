@@ -728,6 +728,34 @@ dialog[open]::backdrop {
 .ctbm-verdict.ok    { color: var(--ok-fg); }
 .ctbm-verdict.short { color: var(--under-fg); }
 
+/* ---- breakdown (Reflect report) -----------------------------------------------------------------
+   KIT: the Phase D spending breakdown — a total over the month on screen and a
+   ranked bar per category, largest first. Sits in a .card. Bars are calm brand
+   (magnitude, not verdict — a spending report has no good/bad), width = the
+   category's share of the total, so the bars visually sum to the whole.
+   MARKUP  (render() writes this)
+     <div class="card breakdown">
+       <div class="bd-total"><span class="small muted">Spent in July 2026</span>
+         <b class="num">$367.35</b></div>
+       <div class="bd-row"><div class="bd-head"><span class="bd-name">Groceries</span>
+         <span class="bd-amt num">$170.50 · 46%</span></div>
+         <div class="bd-bar"><i style="width:46%"></i></div></div>
+       …one .bd-row per category…
+     </div>
+   TOKENS  brand, hairline, ink-2, s-*, fs-body/meta */
+.bd-total {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
+  padding-bottom: var(--s3); margin-bottom: var(--s3);
+  border-bottom: 1px solid var(--hairline);
+}
+.bd-total b { font-size: 22px; font-weight: 800; }
+.bd-row + .bd-row { margin-top: var(--s4); }
+.bd-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s2); }
+.bd-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-amt { font-size: var(--fs-meta); font-weight: 700; color: var(--ink-2); flex: none; }
+.bd-bar { height: 8px; border-radius: 4px; background: rgba(32, 40, 42, 0.07); overflow: hidden; }
+.bd-bar > i { display: block; height: 100%; border-radius: 4px; background: rgba(12, 95, 102, 0.55); }
+
 /* ---- banner (recurring due) -------------------------------------------------------------------
    KIT: quiet prompt card with one action. */
 .banner {
@@ -767,7 +795,9 @@ dialog[open]::backdrop {
 /* Per-tab chrome: only Budget shows the RTA banner; only Budget + Accounts
    show the month stepper. Stubs keep the switcher row. */
 body:not([data-tab="budget"]) .rta-banner { display: none; }
-body:not([data-tab="budget"]):not([data-tab="accounts"]) .appbar-month { display: none; }
+/* Budget, Accounts and Reflect are all month-scoped, so they keep the ‹ month ›
+   stepper; Home and Settings drop it. */
+body:not([data-tab="budget"]):not([data-tab="accounts"]):not([data-tab="reflect"]) .appbar-month { display: none; }
 
 /* Budget screen: phone order is summary → categories (flex order), so the
    month story reads before the table. §5 re-lays this grid with the summary

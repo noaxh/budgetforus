@@ -72,6 +72,38 @@ export const sumSpentInRange = (history, id, from, to) =>
   history.filter(t => t.category_id === id && t.kind === 'expense' && t.occurred_on >= from && t.occurred_on <= to)
          .reduce((s, t) => s + cents(t.amount), 0)
 
+// ---------------------------------------------------------------- reports
+
+// The Phase D spending breakdown: the expenses in `txns`, grouped by category,
+// largest first, with the grand total. Pure so the Reflect report is testable
+// like the rest of the money math. Income is ignored (a breakdown is where money
+// went), and every uncategorized expense folds into one 'Uncategorized' bucket so
+// the parts always sum to the whole. Amounts stay in cents; the caller derives
+// each row's share of the total for the bar width.
+// ponytail: whatever `txns` it's handed -- the app passes the month on screen, so
+// the report follows the month stepper. A multi-month range is the 'spending
+// trends' report (Phase D item 2), which is this same function over a wider slice.
+export function spendingBreakdown(txns, cats) {
+  const name = new Map(cats.map(c => [c.id, c.name]))
+  const byCat = new Map()
+  let total = 0
+  for (const t of txns) {
+    if (t.kind !== 'expense') continue
+    const c = cents(t.amount)
+    total += c
+    const key = t.category_id ?? '__uncat__'   // a uuid has no underscores, so this sentinel can't collide
+    byCat.set(key, (byCat.get(key) || 0) + c)
+  }
+  const rows = [...byCat.entries()]
+    .map(([key, amount]) => ({
+      id: key === '__uncat__' ? null : key,
+      name: key === '__uncat__' ? 'Uncategorized' : (name.get(key) ?? 'Uncategorized'),
+      amount
+    }))
+    .sort((a, b) => b.amount - a.amount)
+  return { rows, total }
+}
+
 // ---------------------------------------------------------------- targets
 
 // Whole months from month-start `ms` to a due date, counting both endpoint
@@ -228,6 +260,26 @@ if (location.search.includes('selftest')) {
     { category_id: 'f', kind: 'expense', amount: 9,  occurred_on: '2026-06-10' }
   ]
   eq(sumSpentInRange(SP, 'g', '2026-06-01', '2026-06-30'), 1000, 'last-month spend: only that category, that month, expenses only')
+
+  // Spending breakdown: expenses only, grouped, largest first, null folds to one
+  // Uncategorized bucket, and income never becomes a row.
+  const BD = [
+    { category_id: 'g', kind: 'expense', amount: 10,  occurred_on: '2026-07-02' },
+    { category_id: 'g', kind: 'expense', amount: 5,   occurred_on: '2026-07-10' },
+    { category_id: 'f', kind: 'expense', amount: 20,  occurred_on: '2026-07-11' },
+    { category_id: null, kind: 'expense', amount: 3,  occurred_on: '2026-07-12' },
+    { category_id: 'g', kind: 'income',  amount: 999, occurred_on: '2026-07-13' }
+  ]
+  const bd = spendingBreakdown(BD, [{ id: 'g', name: 'Groceries' }, { id: 'f', name: 'Fun' }])
+  eq(bd.total, 3800, 'breakdown total is expenses only, in cents')
+  eq(bd.rows.length, 3, 'income adds no row')
+  eq(bd.rows[0].name, 'Fun', 'largest category first')
+  eq(bd.rows[0].amount, 2000, 'fun is the single $20 expense')
+  eq(bd.rows[1].name, 'Groceries', 'groceries second')
+  eq(bd.rows[1].amount, 1500, 'groceries sums its two expenses')
+  eq(bd.rows[2].name, 'Uncategorized', 'the null bucket is labelled Uncategorized')
+  eq(bd.rows[2].amount, 300, 'uncategorized is the $3 expense')
+  eq(spendingBreakdown([], []).total, 0, 'an empty month breaks down to nothing')
 
   eq(envStatus(-1, 0), 'over', 'a cent in the hole is in the hole')
   eq(envStatus(5000, 0), 'ok', 'money left, no shortfall')

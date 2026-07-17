@@ -130,11 +130,14 @@
     </section>
 
     <section class="screen" id="screen-reflect" data-screen="reflect" hidden>
-      <div class="card empty-state">
-        <span class="empty-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 20V10"/><path d="M12 20V4"/><path d="M19 20v-6"/></svg></span>
-        <h2>Reflect</h2>
-        <p>Spending breakdown, income vs expense and age of money arrive with Phase D reports.</p>
+      <div class="section-head">
+        <h2>Spending <span class="small muted" id="reflect-sub"></span></h2>
       </div>
+      <!-- breakdown (kit): render() fills this with a .breakdown report card for
+           the month on screen, or an .empty when nothing was spent. OPUS: income
+           vs expense and age of money (Phase D items 2-3) add more report cards
+           below this one — each its own container filled from render(). -->
+      <div id="reflect-report"></div>
     </section>
 
     <section class="screen" id="screen-settings" data-screen="settings" hidden>

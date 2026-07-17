@@ -1,7 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
-  prevMonthStart, sumSpentInRange, rollup, recurringOccurrences
+  prevMonthStart, sumSpentInRange, spendingBreakdown, rollup, recurringOccurrences
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -338,8 +338,29 @@ function render() {
   $('sel-toggle').textContent = sel ? 'Done' : 'Select'
   if (sel) $('bulk-count').textContent = `${state.sel.size} selected`
 
-  // OPUS: render the next screen's containers here (e.g. Reflect's report
-  // cards), reading from `roll` and state. Do not fetch inside render().
+  // --- reflect: spending breakdown (Phase D). The month on screen, expenses by
+  // category, largest first, each bar the category's share of the total. Reads
+  // state.txns (this month's list) — the same slice the register shows — so the
+  // report follows the month stepper with no extra fetch.
+  const bd = spendingBreakdown(state.txns, state.cats)
+  $('reflect-sub').textContent = bd.total ? `· ${money(bd.total)} this month` : ''
+  $('reflect-report').innerHTML = bd.total ? `
+    <div class="card breakdown">
+      <div class="bd-total">
+        <span class="small muted">Spent in ${monthLabel(state.month)}</span>
+        <b class="num">${money(bd.total)}</b>
+      </div>
+      ${bd.rows.map(r => {
+        const pct = Math.round(r.amount / bd.total * 100)
+        return `<div class="bd-row">
+          <div class="bd-head">
+            <span class="bd-name">${esc(r.name)}</span>
+            <span class="bd-amt num">${money(r.amount)} &middot; ${pct}%</span>
+          </div>
+          <div class="bd-bar"><i style="width:${r.amount / bd.total * 100}%"></i></div>
+        </div>`
+      }).join('')}
+    </div>` : '<div class="rows"><div class="empty">Nothing spent in ' + esc(monthLabel(state.month)) + ' yet.</div></div>'
 }
 
 async function refresh() {
