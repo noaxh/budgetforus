@@ -131,12 +131,16 @@
 
     <section class="screen" id="screen-reflect" data-screen="reflect" hidden>
       <div class="section-head">
-        <h2>Spending <span class="small muted" id="reflect-sub"></span></h2>
+        <h2>Reflect <span class="small muted" id="reflect-sub"></span></h2>
       </div>
+      <!-- cashflow (kit): render() fills this with income vs expense + net for
+           the month on screen. The overview card; the breakdown below is the
+           expense detail. -->
+      <div id="reflect-cashflow"></div>
       <!-- breakdown (kit): render() fills this with a .breakdown report card for
-           the month on screen, or an .empty when nothing was spent. OPUS: income
-           vs expense and age of money (Phase D items 2-3) add more report cards
-           below this one — each its own container filled from render(). -->
+           the month on screen, or an .empty when nothing was spent. OPUS: age of
+           money (Phase D item 3) adds another report card below this one — its
+           own container filled from render(). -->
       <div id="reflect-report"></div>
     </section>
 

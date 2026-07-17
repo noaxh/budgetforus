@@ -728,6 +728,31 @@ dialog[open]::backdrop {
 .ctbm-verdict.ok    { color: var(--ok-fg); }
 .ctbm-verdict.short { color: var(--under-fg); }
 
+/* ---- cashflow (Reflect report) ------------------------------------------------------------------
+   KIT: the Phase D income-vs-expense overview for the month on screen. Reuses
+   .summary-line for the two rows; the net line is emphasized and sign-colored
+   (green surplus / red deficit / ink when it breaks even).
+   MARKUP  (render() writes this)
+     <div class="card cashflow">
+       <div class="summary-line"><span>Income</span><span class="num cf-pos">+$3,200.00</span></div>
+       <div class="summary-line"><span>Expenses</span><span class="num">−$2,067.75</span></div>
+       <div class="cashflow-net net-pos"><span>Net this month</span><span class="num">+$1,132.25</span></div>
+     </div>
+   TOKENS  ok-fg (surplus, 6.65 on surface), over-fg (deficit, 7.07), hairline */
+.cashflow .cf-pos { color: var(--ok-fg); }
+.cashflow-net {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
+  margin-top: var(--s3); padding-top: var(--s3);
+  border-top: 1px solid var(--hairline);
+  font-weight: 800;
+}
+.cashflow-net .num { font-size: var(--fs-body); font-weight: 800; }
+.cashflow-net.net-pos, .cashflow-net.net-pos .num { color: var(--ok-fg); }
+.cashflow-net.net-neg, .cashflow-net.net-neg .num { color: var(--over-fg); }
+
+/* The two Reflect cards stack with a gap. */
+#reflect-report { margin-top: var(--s4); }
+
 /* ---- breakdown (Reflect report) -----------------------------------------------------------------
    KIT: the Phase D spending breakdown — a total over the month on screen and a
    ranked bar per category, largest first. Sits in a .card. Bars are calm brand

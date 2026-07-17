@@ -104,6 +104,20 @@ export function spendingBreakdown(txns, cats) {
   return { rows, total }
 }
 
+// Income vs expense for a set of transactions, in cents. The Phase D cash-flow
+// report. Pure + selftested; net is income - expense, so a surplus is positive
+// and a deficit negative. Same slice as the breakdown (the month on screen), so
+// the two Reflect cards always describe the same window.
+export function cashFlow(txns) {
+  let income = 0, expense = 0
+  for (const t of txns) {
+    const c = cents(t.amount)
+    if (t.kind === 'income') income += c
+    else expense += c
+  }
+  return { income, expense, net: income - expense }
+}
+
 // ---------------------------------------------------------------- targets
 
 // Whole months from month-start `ms` to a due date, counting both endpoint
@@ -280,6 +294,18 @@ if (location.search.includes('selftest')) {
   eq(bd.rows[2].name, 'Uncategorized', 'the null bucket is labelled Uncategorized')
   eq(bd.rows[2].amount, 300, 'uncategorized is the $3 expense')
   eq(spendingBreakdown([], []).total, 0, 'an empty month breaks down to nothing')
+
+  // Cash flow: income and expense summed apart, net is their difference.
+  const cf = cashFlow([
+    { kind: 'income',  amount: 3200 },
+    { kind: 'expense', amount: 1800 },
+    { kind: 'expense', amount: 200 }
+  ])
+  eq(cf.income, 320000, 'cashflow sums income')
+  eq(cf.expense, 200000, 'cashflow sums expense')
+  eq(cf.net, 120000, 'net is income minus expense (a surplus)')
+  eq(cashFlow([]).net, 0, 'an empty month nets zero')
+  eq(cashFlow([{ kind: 'expense', amount: 50 }]).net, -5000, 'expenses with no income is a deficit')
 
   eq(envStatus(-1, 0), 'over', 'a cent in the hole is in the hole')
   eq(envStatus(5000, 0), 'ok', 'money left, no shortfall')

@@ -1,7 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
-  prevMonthStart, sumSpentInRange, spendingBreakdown, rollup, recurringOccurrences
+  prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, rollup, recurringOccurrences
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -338,12 +338,26 @@ function render() {
   $('sel-toggle').textContent = sel ? 'Done' : 'Select'
   if (sel) $('bulk-count').textContent = `${state.sel.size} selected`
 
-  // --- reflect: spending breakdown (Phase D). The month on screen, expenses by
-  // category, largest first, each bar the category's share of the total. Reads
-  // state.txns (this month's list) — the same slice the register shows — so the
-  // report follows the month stepper with no extra fetch.
+  // --- reflect (Phase D reports). Both cards read state.txns (this month's list,
+  // the same slice the register shows), so they follow the month stepper with no
+  // extra fetch and always describe the same window.
+  $('reflect-sub').textContent = `· ${monthLabel(state.month)}`
+
+  // Income vs expense overview: money in, money out, and the net (green surplus /
+  // red deficit). Signs are explicit — money() already renders a negative net
+  // with its own minus, so only a positive net needs a prepended plus.
+  const cf = cashFlow(state.txns)
+  const netK = cf.net > 0 ? 'net-pos' : cf.net < 0 ? 'net-neg' : ''
+  $('reflect-cashflow').innerHTML = `
+    <div class="card cashflow">
+      <div class="summary-line"><span>Income</span><span class="num ${cf.income ? 'cf-pos' : ''}">${cf.income ? '+' : ''}${money(cf.income)}</span></div>
+      <div class="summary-line"><span>Expenses</span><span class="num">${cf.expense ? '&minus;' : ''}${money(cf.expense)}</span></div>
+      <div class="cashflow-net ${netK}"><span>Net this month</span><span class="num">${cf.net > 0 ? '+' : ''}${money(cf.net)}</span></div>
+    </div>`
+
+  // Spending breakdown: the month on screen, expenses by category, largest first,
+  // each bar the category's share of the total.
   const bd = spendingBreakdown(state.txns, state.cats)
-  $('reflect-sub').textContent = bd.total ? `· ${money(bd.total)} this month` : ''
   $('reflect-report').innerHTML = bd.total ? `
     <div class="card breakdown">
       <div class="bd-total">
