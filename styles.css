@@ -185,6 +185,8 @@ body.amounts-hidden .avail { filter: blur(7px); -webkit-user-select: none; user-
   .btn:hover        { filter: brightness(1.12); }
   .btn-quiet:hover  { background-color: rgba(32, 40, 42, 0.09); }
   .btn-danger:hover { background-color: var(--over-tint); }
+  .menu-item:hover  { background-color: rgba(32, 40, 42, 0.06); }
+  .menu-danger:hover { background-color: var(--over-tint); }
   .row-del:hover    { background-color: var(--over-tint); color: var(--over-fg); }
   .tab:hover        { color: var(--ink); }
   .acct-row:hover, .txn-row .txn-body:hover { background-color: rgba(32, 40, 42, 0.03); }
@@ -211,6 +213,11 @@ button {
   transition: transform var(--t-press) var(--ease-out), filter var(--t-press) ease, background-color var(--t-press) ease;
 }
 .btn:active { transform: scale(0.96); background: var(--brand-press); }
+/* Destructive primary (delete confirm): the filled button turns red. White on
+   over-pill measures 6.54, same as the overspent pill. */
+.btn.danger { background: var(--over-pill); }
+.btn.danger:active { background: var(--over-fg); }
+.btn:disabled { opacity: 0.4; pointer-events: none; }
 
 .btn-quiet {
   background-color: rgba(32, 40, 42, 0.06);
@@ -230,8 +237,14 @@ button {
   border-radius: var(--r-ctl);
   transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
 }
-.icon-btn { padding: 0; width: var(--tap); min-height: var(--tap); font-size: 20px; font-weight: 500; line-height: 1; border-radius: var(--r-ctl); }
+.icon-btn { padding: 0; width: var(--tap); min-height: var(--tap); border-radius: var(--r-ctl); display: grid; place-items: center; color: var(--ink); }
+.icon-btn svg { width: 22px; height: 22px; }
 .icon-btn:active, .btn-danger:active, .row-del:active { transform: scale(0.96); }
+/* hide-amounts swaps eye ⇄ eye-off purely by state — app.js flips aria-pressed,
+   CSS shows the right glyph. Both SVGs occupy the same grid cell; only one shows. */
+#hide-amounts .i-eye-off { display: none; }
+#hide-amounts[aria-pressed="true"] .i-eye { display: none; }
+#hide-amounts[aria-pressed="true"] .i-eye-off { display: block; color: var(--brand); }
 
 /* ---- controls: fields -----------------------------------------------------
    KIT: .field — label over control. 16px font is the iOS no-zoom floor.
@@ -320,24 +333,33 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
   box-shadow: 0 1px 0 var(--hairline);
 }
 .appbar-top { display: flex; align-items: center; gap: var(--s1); }
-/* The switcher is navigation dressed as a title — transparent, bold, chevron. */
-.appbar-top select {
-  width: auto; flex: 1; min-width: 0;
-  background-color: transparent; border: none;
-  font-weight: 800; font-size: var(--fs-section);
-  padding: 8px 24px 8px 2px;
-  background-position: right 2px center;
+/* The switcher is navigation dressed as a title — transparent, bold, chevron.
+   A button (not a native <select>) so the picker is our own sheet, not the OS
+   dropdown. Chevron nudges down on press for a hair of "opening" feedback. */
+.switcher {
+  display: flex; align-items: center; gap: var(--s1);
+  flex: 1; min-width: 0;
+  min-height: var(--tap);
+  padding: 8px 4px 8px 2px;
+  font-weight: 800; font-size: var(--fs-section); color: var(--ink);
+  border-radius: var(--r-ctl);
+  transition: transform var(--t-press) var(--ease-out);
 }
-.appbar-top select:focus { box-shadow: none; background-color: transparent; }
+.switcher:active { transform: scale(0.98); }
+.switcher-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher-chev { width: 20px; height: 20px; flex: none; color: var(--ink-2); transition: transform var(--t-press) var(--ease-out); }
+.switcher:active .switcher-chev { transform: translateY(1px); }
 .appbar-month { display: flex; align-items: center; justify-content: space-between; padding: var(--s1) 0; }
 .appbar-month h1 { font-size: 22px; }
 .month-btn {
   width: var(--tap); height: var(--tap);
   border-radius: 50%;
   background-color: rgba(32, 40, 42, 0.06);
-  font-size: 20px; line-height: 1;
+  color: var(--ink);
+  display: grid; place-items: center;
   transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
 }
+.month-btn svg { width: 22px; height: 22px; }
 .month-btn:active { transform: scale(0.96); }
 
 /* ---- rta-banner ---------------------------------------------------------------
@@ -846,6 +868,42 @@ dialog[open]::backdrop {
 .aa-modes .btn-quiet { display: block; width: 100%; text-align: left; }
 .danger-zone { margin-top: var(--s8); text-align: center; }
 
+/* ---- menu-sheet (header overflow action menu) ---------------------------------------------------
+   KIT: an action list inside the sheet kit — icon + label rows, not a form.
+   Opened by the app bar ⋯ (#menu-btn) as #menu-dialog, so it inherits the sheet
+   slide-up, backdrop blur, @starting-style and the §5 centered-modal treatment
+   for free. Destructive rows get .menu-danger.
+   MARKUP  <dialog id="menu-dialog"><div class="sheet menu-sheet">
+             <button class="menu-item"><svg…/><span>New budget</span></button>
+             <button class="menu-item menu-danger" id="signout">…Sign out</button>
+           </div></dialog>
+   TOKENS  ink, ink-2, over-fg/over-tint, r-ctl, fs-body, tap, t-press, ease-out
+   No grabber on this one: it's a short menu, not a scrolling form — the ::before
+   handle would read as "drag me" on three tidy rows. */
+.menu-sheet { padding-top: var(--s4); }
+.menu-sheet::before { display: none; }
+.menu-item {
+  display: flex; align-items: center; gap: var(--s3);
+  width: 100%; text-align: left;
+  min-height: 52px; padding: 10px var(--s3);
+  border-radius: var(--r-ctl);
+  font-size: var(--fs-body); font-weight: 600; color: var(--ink);
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
+}
+.menu-item + .menu-item { margin-top: 2px; }
+.menu-item svg { width: 22px; height: 22px; flex: none; color: var(--ink-2); }
+.menu-item:active { transform: scale(0.98); background-color: rgba(32, 40, 42, 0.06); }
+.menu-danger, .menu-danger svg { color: var(--over-fg); }
+
+/* Budget picker rows: a menu-item that carries a leading check on the active
+   budget. The check is always in the DOM (steady left gutter); only its
+   visibility flips, so names never shift when the selection changes. */
+.budget-opt .opt-check { color: var(--brand); visibility: hidden; }
+.budget-opt.is-active { color: var(--brand); }
+.budget-opt.is-active .opt-check { visibility: visible; }
+/* New-budget action sits under a hairline, set apart from the list of budgets. */
+.menu-add { margin-top: var(--s2); border-top: 1px solid var(--hairline); border-radius: 0 0 var(--r-ctl) var(--r-ctl); }
+
 /* ================================ §4 SCREENS ============================== */
 
 /* Per-tab chrome: only Budget shows the RTA banner; only Budget + Accounts
@@ -892,7 +950,7 @@ body:not([data-tab="budget"]):not([data-tab="accounts"]):not([data-tab="reflect"
   .appbar, main { margin-left: var(--sidebar-w); }
   .screen { max-width: 960px; padding-bottom: 96px; }
   .appbar { padding-left: var(--s6); padding-right: var(--s6); }
-  .appbar-top select { flex: none; }
+  .switcher { flex: none; }
 
   /* Budget: category table left, Inspector rail right. */
   .budget-grid { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector-w); gap: var(--s4); align-items: start; }

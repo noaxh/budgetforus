@@ -30,16 +30,33 @@
   <!-- ============ appbar (kit: .appbar) — sticky glass chrome ============ -->
   <header class="appbar glass">
     <div class="appbar-top">
-      <select id="budget-switch" aria-label="Budget"></select>
-      <button class="btn-quiet icon-btn" id="rename-budget" aria-label="Rename budget" title="Rename budget" hidden>&#9998;</button>
-      <button class="btn-quiet icon-btn" id="new-budget" aria-label="New budget" title="New budget">+</button>
-      <button class="btn-quiet icon-btn" id="hide-amounts" aria-label="Hide amounts" aria-pressed="false" title="Hide amounts">&#128065;</button>
-      <button class="btn-quiet" id="signout">Sign out</button>
+      <!-- switcher: a button, not a native <select> — opens #switch-dialog so the
+           picker is on-system (bottom sheet / centered modal), not the OS dropdown.
+           render() writes #budget-name; app.js opens the picker. -->
+      <button class="switcher" id="budget-switch" aria-haspopup="dialog" aria-label="Switch budget">
+        <span class="switcher-name" id="budget-name"></span>
+        <svg class="switcher-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <!-- hide-amounts: first-class quick toggle (frequent on a shared phone). Two
+           SVGs; §3 shows one by [aria-pressed]. app.js flips aria-pressed only. -->
+      <button class="btn-quiet icon-btn" id="hide-amounts" aria-label="Hide amounts" aria-pressed="false" title="Hide amounts">
+        <svg class="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.7 5.1A9.9 9.9 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-3.1 3.9M6.5 6.6A18 18 0 0 0 2 12s3.5 7 10 7a9.9 9.9 0 0 0 4-.8"/><path d="m3 3 18 18"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+      </button>
+      <!-- overflow: opens the header action menu (#menu-dialog). Rename / new /
+           sign out live there — occasional actions, off the bar. -->
+      <button class="btn-quiet icon-btn" id="menu-btn" aria-label="More" aria-haspopup="dialog" title="More">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+      </button>
     </div>
     <div class="appbar-month">
-      <button class="month-btn" id="prev" aria-label="Previous month">&lsaquo;</button>
+      <button class="month-btn" id="prev" aria-label="Previous month">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
       <h1 id="month-label"></h1>
-      <button class="month-btn" id="next" aria-label="Next month">&rsaquo;</button>
+      <button class="month-btn" id="next" aria-label="Next month">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
     </div>
     <!-- rta-banner (kit): render() fills it; solid state tint, never glass
          under the number. Shown on the Budget tab only (styles §4). -->
@@ -393,6 +410,61 @@
       <button type="button" class="btn" id="bulk-apply">Apply</button>
     </div>
   </div>
+</dialog>
+
+<!-- header overflow menu (kit: .menu-sheet). Action list, not a form: full-width
+     rows, icon + label, destructive row tinted. Reuses the <dialog> slide-up +
+     backdrop from the sheet kit; app.js only opens it and light-dismisses. The
+     row IDs are the originals moved off the app bar, so their handlers are
+     unchanged. -->
+<dialog id="menu-dialog">
+  <div class="sheet menu-sheet">
+    <button class="menu-item" id="new-budget">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      <span>New budget</span>
+    </button>
+    <button class="menu-item" id="rename-budget">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      <span>Rename budget</span>
+    </button>
+    <button class="menu-item menu-danger" id="signout">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+      <span>Sign out</span>
+    </button>
+  </div>
+</dialog>
+
+<!-- budget picker (kit: .menu-sheet). Replaces the native <select> dropdown.
+     render path: app.js renderBudgetList() fills #budget-list with one .budget-opt
+     per budget (active one checked); the New-budget row runs newBudget(). -->
+<dialog id="switch-dialog">
+  <div class="sheet menu-sheet">
+    <div class="sheet-head"><h2>Budgets</h2></div>
+    <div id="budget-list"></div>
+    <button class="menu-item menu-add" id="add-budget">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      <span>New budget</span>
+    </button>
+  </div>
+</dialog>
+
+<!-- prompt sheet: the on-system replacement for window.prompt(). One reusable
+     dialog driven by openPrompt() in app.js — new budget, rename, and the
+     type-to-confirm delete all flow through it. confirmText mode gates the CTA
+     until the typed name matches; danger mode paints the CTA red. -->
+<dialog id="prompt-dialog">
+  <form class="sheet" id="prompt-form">
+    <div class="sheet-head"><h2 id="prompt-title"></h2></div>
+    <p class="small muted" id="prompt-msg" hidden></p>
+    <div class="field">
+      <label for="prompt-input" id="prompt-label"></label>
+      <input type="text" id="prompt-input" autocomplete="off" maxlength="120">
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn-quiet" id="prompt-cancel">Cancel</button>
+      <button type="submit" class="btn" id="prompt-ok">Save</button>
+    </div>
+  </form>
 </dialog>
 
 <datalist id="payee-list"></datalist>

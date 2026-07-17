@@ -146,13 +146,11 @@ function autoAssignRows(mode, roll) {
 function render() {
   $('month-label').textContent = monthLabel(state.month)
 
-  // No "New budget…" option in here. With zero budgets it would be the only
-  // option and therefore already selected, so picking it fires no change event
-  // and nothing happens -- broken in exactly the case you need it. Creating is
-  // a button.
-  $('budget-switch').innerHTML = state.budgets
-    .map(b => `<option value="${b.id}" ${b.id === state.budgetId ? 'selected' : ''}>${esc(b.name)}</option>`)
-    .join('')
+  // The active budget's name reads as the title; tapping it opens the picker
+  // (#switch-dialog). The picker has its own New-budget row, so there is no
+  // phantom "New budget…" entry to mis-select the way a <select> option would.
+  const active = state.budgets.find(b => b.id === state.budgetId)
+  $('budget-name').textContent = active ? active.name : ''
 
   const has = !!state.budgetId
   $('no-budget').hidden = has
@@ -490,8 +488,7 @@ $('accounts').onclick = async e => {
   if (!b || b.dataset.acct === state.budgetId) return
   state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''
   state.budgetId = b.dataset.acct
-  $('budget-switch').value = state.budgetId
-  await refresh()
+  await refresh()   // re-renders the switcher label; no <select>.value to sync now
 }
 
 // ---------------------------------------------------------------- events
@@ -516,8 +513,7 @@ const HIDE_KEY = 'budget.hideAmounts'
 function applyHide(on) {
   document.body.classList.toggle('amounts-hidden', on)
   const b = $('hide-amounts')
-  b.setAttribute('aria-pressed', String(on))
-  b.textContent = on ? '\u{1F648}' : '\u{1F441}'   // see-no-evil / eye
+  b.setAttribute('aria-pressed', String(on))   // §3 swaps eye ⇄ eye-off off this
   b.title = on ? 'Show amounts' : 'Hide amounts'
   b.setAttribute('aria-label', b.title)
 }
@@ -528,14 +524,81 @@ $('hide-amounts').onclick = () => {
 }
 applyHide(localStorage.getItem(HIDE_KEY) === '1')
 
-$('budget-switch').onchange = async e => {
+// Header overflow (⋯): rename / new / sign out live in a menu sheet now, off the
+// bar. Open on tap; light-dismiss on the backdrop or after any item is chosen.
+// The item's own handler (below) runs first as the click bubbles, then this
+// closes the sheet. Esc-to-close comes free from <dialog>.
+$('menu-btn').onclick = () => $('menu-dialog').showModal()
+$('menu-dialog').onclick = e => {
+  if (e.target === e.currentTarget || e.target.closest('.menu-item')) $('menu-dialog').close()
+}
+
+// Budget picker: the switcher button opens a sheet listing every budget (active
+// one checked) plus a New-budget row. Replaces the native <select> dropdown.
+function renderBudgetList() {
+  $('budget-list').innerHTML = state.budgets.map(b => `
+    <button class="menu-item budget-opt${b.id === state.budgetId ? ' is-active' : ''}" data-pick="${b.id}">
+      <svg class="opt-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-11"/></svg>
+      <span>${esc(b.name)}</span>
+    </button>`).join('')
+}
+async function switchTo(id) {
+  if (id === state.budgetId) return
   state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''
-  state.budgetId = e.target.value
+  state.budgetId = id
   await refresh()
+}
+$('budget-switch').onclick = () => { renderBudgetList(); $('switch-dialog').showModal() }
+$('switch-dialog').onclick = e => {
+  if (e.target === e.currentTarget) return $('switch-dialog').close()   // backdrop
+  const opt = e.target.closest('[data-pick]')
+  if (opt) { $('switch-dialog').close(); switchTo(opt.dataset.pick); return }
+  if (e.target.closest('#add-budget')) { $('switch-dialog').close(); newBudget() }
+}
+
+// openPrompt — the on-system replacement for window.prompt(). Resolves to the
+// entered string, or null if dismissed (Cancel / Esc / backdrop). One reusable
+// #prompt-dialog: title + label + cta; `confirmText` gates the CTA until the
+// input matches it (delete), `danger` paints the CTA red. A `done` latch makes
+// the first outcome win, so a submit value beats the close→null that follows it.
+function openPrompt({ title, label, message = '', value = '', cta = 'Save', danger = false, confirmText = null }) {
+  const dlg = $('prompt-dialog'), input = $('prompt-input'), ok = $('prompt-ok'), msg = $('prompt-msg')
+  $('prompt-title').textContent = title
+  $('prompt-label').textContent = label
+  msg.textContent = message; msg.hidden = !message
+  input.value = value
+  ok.textContent = cta
+  ok.classList.toggle('danger', danger)
+  const gate = () => { if (confirmText !== null) ok.disabled = input.value.trim() !== confirmText }
+  gate()
+  return new Promise(resolve => {
+    let done = false
+    const finish = val => {
+      if (done) return
+      done = true
+      input.oninput = null; ok.disabled = false
+      dlg.removeEventListener('close', onClose)
+      resolve(val)
+    }
+    const onClose = () => finish(null)   // Esc, Cancel, or backdrop all close the dialog
+    input.oninput = gate
+    dlg.addEventListener('close', onClose)
+    $('prompt-cancel').onclick = () => dlg.close()
+    dlg.onclick = e => { if (e.target === dlg) dlg.close() }   // backdrop tap
+    $('prompt-form').onsubmit = e => {
+      e.preventDefault()
+      if (confirmText !== null && input.value.trim() !== confirmText) return   // gated: ignore
+      finish(input.value)
+      dlg.close()
+    }
+    dlg.showModal()
+    // focus once the sheet is up; preselect existing text so a rename is one keystroke
+    requestAnimationFrame(() => { input.focus(); if (confirmText === null) input.select() })
+  })
 }
 
 async function newBudget() {
-  const name = prompt('Budget name')  // ponytail: native prompt. Run twice, ever.
+  const name = await openPrompt({ title: 'New budget', label: 'Budget name', cta: 'Create' })
   if (!name?.trim()) return
   const { error } = await sb.from('budgets').insert({ name: name.trim() })
   if (error) return fail(error)
@@ -546,14 +609,13 @@ async function newBudget() {
 $('new-budget').onclick = newBudget
 $('first-budget').onclick = newBudget
 
-// Rename the selected budget. Native prompt, like newBudget -- two people, done
-// rarely. This is also the fix for two budgets sharing a name: rename one so the
-// switcher can tell them apart. The 1-60 length rule lives on the column, so a
-// bad length surfaces through fail() instead of being re-implemented here.
+// Rename the selected budget. Done rarely (two people). Also the fix for two
+// budgets sharing a name: rename one so the switcher can tell them apart. The
+// 1-60 length rule lives on the column, so a bad length surfaces through fail().
 $('rename-budget').onclick = async () => {
   const b = state.budgets.find(x => x.id === state.budgetId)
   if (!b) return
-  const name = prompt('Rename budget', b.name)
+  const name = await openPrompt({ title: 'Rename budget', label: 'Budget name', value: b.name, cta: 'Save' })
   if (name === null) return
   const trimmed = name.trim()
   if (!trimmed || trimmed === b.name) return
@@ -565,12 +627,17 @@ $('rename-budget').onclick = async () => {
 $('del-budget').onclick = async () => {
   const b = state.budgets.find(x => x.id === state.budgetId)
   if (!b) return
-  // Typing the name, not a confirm(). This cascades to every category,
-  // transaction, assignment and rule in the budget, and a confirm() is one
-  // thumb-slip on a phone away from wiping a year of data with no undo.
-  const typed = prompt(`Delete "${b.name}" and everything in it — categories, transactions, recurring rules — permanently?\n\nType the budget name to confirm:`)
+  // Type-the-name, not confirm(): this cascades to every category, transaction,
+  // assignment and rule, and a confirm() is one thumb-slip on a phone from wiping
+  // a year of data. openPrompt's confirmText gates the Delete button until the
+  // name matches, so a mismatch can't even submit -- no post-hoc alert needed.
+  const typed = await openPrompt({
+    title: `Delete "${b.name}"?`,
+    message: 'Removes its categories, transactions and recurring rules for good. This cannot be undone.',
+    label: 'Type the budget name to confirm',
+    cta: 'Delete', danger: true, confirmText: b.name
+  })
   if (typed === null) return
-  if (typed.trim() !== b.name) return alert('That name did not match. Nothing was deleted.')
   const { error } = await sb.from('budgets').delete().eq('id', b.id)
   if (error) return fail(error)
   state.budgetId = null   // loadBudgets falls back to whatever is left
