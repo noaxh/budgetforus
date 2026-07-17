@@ -111,6 +111,10 @@
           <button class="btn-quiet" id="manage-rec">Recurring</button>
         </div>
       </div>
+      <!-- txn-search: free-text filter over the register (payee / category /
+           flag / amount / date). Static input — render() rebuilds the rows below
+           it, never the box, so typing keeps focus. -->
+      <input type="search" id="txn-search" class="txn-search" placeholder="Search transactions" autocomplete="off" aria-label="Search transactions">
       <!-- txn-filter: render() fills this with a dismissable chip when a Reflect
            drill-through has filtered the register to one category. -->
       <div id="txn-filter"></div>

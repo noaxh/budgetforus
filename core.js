@@ -118,6 +118,20 @@ export function cashFlow(txns) {
   return { income, expense, net: income - expense }
 }
 
+// True if transaction `t` matches the free-text query `q` (already lowercased),
+// searched across description, its category's name (via nameOf), flag, amount and
+// date. Substring, case-insensitive; an empty query matches everything. Pure so
+// the register search is testable and the searched fields live in one place.
+// ponytail: one substring over a few joined fields, not per-field operators or an
+// exact/phrase mode -- those are the search bar's later enhancements. Amount is
+// matched as its raw string ('92.4'), so '92' hits but '92.40' would not.
+export function txnMatches(t, q, nameOf) {
+  if (!q) return true
+  return [t.description, nameOf(t.category_id), t.flag,
+          t.amount != null ? String(t.amount) : '', t.occurred_on]
+    .join(' ').toLowerCase().includes(q)
+}
+
 // ---------------------------------------------------------------- targets
 
 // Whole months from month-start `ms` to a due date, counting both endpoint
@@ -306,6 +320,18 @@ if (location.search.includes('selftest')) {
   eq(cf.net, 120000, 'net is income minus expense (a surplus)')
   eq(cashFlow([]).net, 0, 'an empty month nets zero')
   eq(cashFlow([{ kind: 'expense', amount: 50 }]).net, -5000, 'expenses with no income is a deficit')
+
+  // Register search: substring across description, category name, flag, amount, date.
+  const TM = { description: 'Metro groceries', category_id: 'g', flag: 'green', amount: 92.4, occurred_on: '2026-07-03' }
+  const nameOf = id => id === 'g' ? 'Groceries' : 'Uncategorized'
+  eq(txnMatches(TM, '', nameOf), true, 'an empty query matches everything')
+  eq(txnMatches(TM, 'metro', nameOf), true, 'matches the description')
+  eq(txnMatches(TM, 'grocer', nameOf), true, 'matches the category name (not stored on the row)')
+  eq(txnMatches(TM, 'green', nameOf), true, 'matches the flag')
+  eq(txnMatches(TM, '92', nameOf), true, 'matches an amount substring')
+  eq(txnMatches(TM, '07-03', nameOf), true, 'matches the date')
+  eq(txnMatches(TM, 'xyz', nameOf), false, 'a miss returns false')
+  eq(txnMatches({ description: 'x', category_id: null, amount: 1, occurred_on: '2026-07-01' }, 'uncategorized', nameOf), true, 'an uncategorized row matches its bucket name')
 
   eq(envStatus(-1, 0), 'over', 'a cent in the hole is in the hole')
   eq(envStatus(5000, 0), 'ok', 'money left, no shortfall')

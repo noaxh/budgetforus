@@ -793,6 +793,8 @@ dialog[open]::backdrop {
      <div class="filter-chip"><span>Groceries</span>
        <button data-clearfilter aria-label="Clear filter">×</button></div>
    TOKENS  brand, brand-tint, r-pill, fs-meta */
+/* Register search box: the base input styling, just spaced from the rows. */
+.txn-search { margin-bottom: var(--s2); }
 #txn-filter:not(:empty) { margin-bottom: var(--s2); }
 .filter-chip {
   display: inline-flex; align-items: center; gap: var(--s1);

@@ -1,7 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
-  prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, rollup, recurringOccurrences
+  prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, txnMatches, rollup, recurringOccurrences
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -15,7 +15,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '' }
 const $ = id => document.getElementById(id)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
@@ -317,17 +317,25 @@ function render() {
   // --- txn-row (kit): the register. In select mode the row leads with a check
   // and the body toggles selection; the per-row delete yields to the bulk bar.
   const catName = id => state.cats.find(c => c.id === id)?.name ?? 'Uncategorized'
-  // The register can be drilled through to one category from a Reflect breakdown
-  // row. The filter is a view over the month already loaded — it matches on the
-  // same '__uncat__' bucket key the breakdown uses, and never refetches.
+  // The register is a view over the month already loaded: an optional category
+  // drill-through (from a Reflect breakdown row, matched on the same '__uncat__'
+  // bucket key) AND an optional free-text search, both composing, neither
+  // refetching. txnMatches owns which fields the search covers.
   const filterName = state.txnFilter === '__uncat__' ? 'Uncategorized'
     : state.txnFilter ? catName(state.txnFilter) : ''
-  const visibleTxns = state.txnFilter
-    ? state.txns.filter(t => (t.category_id ?? '__uncat__') === state.txnFilter)
-    : state.txns
+  const q = state.txnSearch.trim().toLowerCase()
+  const visibleTxns = state.txns.filter(t =>
+    (!state.txnFilter || (t.category_id ?? '__uncat__') === state.txnFilter) &&
+    txnMatches(t, q, catName))
   $('txn-filter').innerHTML = state.txnFilter
     ? `<div class="filter-chip"><span>${esc(filterName)}</span><button data-clearfilter aria-label="Clear ${esc(filterName)} filter">&times;</button></div>`
     : ''
+  // Keep the (static) search box in sync with state. While typing, oninput has
+  // already set state.txnSearch = box value, so this no-ops and the caret is safe;
+  // the only time they diverge is an external reset (month/budget change), where
+  // writing the box — clearing it — is exactly what we want.
+  const searchEl = $('txn-search')
+  if (searchEl && searchEl.value !== state.txnSearch) searchEl.value = state.txnSearch
   $('txn-count').textContent = visibleTxns.length ? `${visibleTxns.length}` : ''
   const sel = state.selMode
   $('transactions').innerHTML = visibleTxns.length ? visibleTxns.map(t => `
@@ -340,7 +348,7 @@ function render() {
       </div>
       <span class="txn-amt num${t.kind === 'income' ? ' txn-in' : ''}">${t.kind === 'income' ? '+' : '&minus;'}${money(cents(t.amount))}</span>
       ${sel ? '' : `<button class="row-del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>`}
-    </div>`).join('') : `<div class="empty">${state.txnFilter ? 'No transactions in ' + esc(filterName) + ' this month.' : 'Nothing logged this month.'}</div>`
+    </div>`).join('') : `<div class="empty">${(state.txnFilter || q) ? 'No transactions match.' : 'Nothing logged this month.'}</div>`
 
   // Bulk bar reflects the current selection; the Select toggle flips its label.
   // The bar and the FAB share the floating slot, so only one shows at a time.
@@ -480,7 +488,7 @@ $('categories').addEventListener('click', e => {
 $('accounts').onclick = async e => {
   const b = e.target.closest('[data-acct]')
   if (!b || b.dataset.acct === state.budgetId) return
-  state.selMode = false; state.sel.clear(); state.txnFilter = null
+  state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''
   state.budgetId = b.dataset.acct
   $('budget-switch').value = state.budgetId
   await refresh()
@@ -489,7 +497,7 @@ $('accounts').onclick = async e => {
 // ---------------------------------------------------------------- events
 
 // Leaving the month clears any selection: its ids belong to the month you left.
-const goMonth = delta => { if (state.selMode) { state.selMode = false; state.sel.clear() } state.txnFilter = null; state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh() }
+const goMonth = delta => { if (state.selMode) { state.selMode = false; state.sel.clear() } state.txnFilter = null; state.txnSearch = ''; state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh() }
 $('prev').onclick = () => goMonth(-1)
 $('next').onclick = () => goMonth(1)
 
@@ -521,7 +529,7 @@ $('hide-amounts').onclick = () => {
 applyHide(localStorage.getItem(HIDE_KEY) === '1')
 
 $('budget-switch').onchange = async e => {
-  state.selMode = false; state.sel.clear(); state.txnFilter = null
+  state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''
   state.budgetId = e.target.value
   await refresh()
 }
@@ -566,7 +574,7 @@ $('del-budget').onclick = async () => {
   const { error } = await sb.from('budgets').delete().eq('id', b.id)
   if (error) return fail(error)
   state.budgetId = null   // loadBudgets falls back to whatever is left
-  state.txnFilter = null
+  state.txnFilter = null; state.txnSearch = ''
   await loadBudgets()
   await refresh()
 }
@@ -624,6 +632,10 @@ $('txn-filter').onclick = e => {
   state.txnFilter = null
   render()
 }
+
+// Register search: type to filter the visible rows. render() rebuilds the rows
+// but not the (static) input, so focus and the caret survive each keystroke.
+$('txn-search').oninput = e => { state.txnSearch = e.target.value; render() }
 
 // Export the month's spending breakdown (category, spent, share) to CSV. Distinct
 // from the register Export, which dumps raw rows — this is the report summary.
