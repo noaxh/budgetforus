@@ -15,7 +15,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set() }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set() }
 const $ = id => document.getElementById(id)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
@@ -138,6 +138,11 @@ function autoAssignRows(mode, roll) {
   }
 }
 
+// One render pass fills every screen's containers; the tab bar only chooses
+// which is visible, so switching tabs never refetches or re-renders.
+// OPUS: a new screen renders in its own block at the bottom of this function,
+// reading `roll` / state like the blocks above it. Keep templates to the §3
+// kit markup in styles.css — no new class names.
 function render() {
   $('month-label').textContent = monthLabel(state.month)
 
@@ -155,17 +160,30 @@ function render() {
   $('budget-switch').hidden = !has
   $('rename-budget').hidden = !has
   $('add-btn').hidden = !has
-  if (!has) return
+  if (!has) { $('rta-banner').innerHTML = ''; return }
 
   const roll = rollup(state.cats, state.assigns, state.history, monthStart(state.month))
   const totalSpent = sumKind('expense')
   const assignedNow = state.cats.reduce((s, c) => s + (roll.cats.get(c.id)?.assigned ?? 0), 0)
-  const rtaK = roll.rta < 0 ? 'over' : roll.rta > 0 ? 'ok' : 'none'
 
-  // Cost to Be Me: the sum of every target's needed-this-month -- what it costs
-  // to keep every goal on track this month. Compared against an expected-income
-  // figure the user types (kept per budget in localStorage; it isn't budget data,
-  // it's a personal what-if), it answers "does my income cover my plan".
+  // --- rta-banner (kit) — the hero number, counting it to zero is the method.
+  const rtaK = roll.rta < 0 ? 'over' : roll.rta > 0 ? 'ok' : 'zero'
+  $('rta-banner').innerHTML = `
+    <div class="rta-banner rta-${rtaK}">
+      <div class="rta-text">
+        <span class="rta-label">Ready to Assign</span>
+        <span class="rta-amt num">${money(roll.rta)}</span>
+        <span class="rta-hint">${
+          roll.rta < 0 ? 'More assigned than you have. Take some back.'
+          : roll.rta > 0 ? 'Give every dollar a job.'
+          : 'Every dollar has a job.'}</span>
+      </div>
+      ${state.cats.length ? '<button class="btn-quiet" id="auto-assign">Auto-assign</button>' : ''}
+    </div>`
+
+  // --- inspector summary card: month totals + Cost to Be Me. CTBM is the sum
+  // of every target's needed-this-month vs an expected-income figure the user
+  // types (localStorage per budget; a personal what-if, not budget data).
   const costToBeMe = state.cats.reduce((s, c) => s + (roll.cats.get(c.id)?.needed ?? 0), 0)
   const hasTargets = state.cats.some(c => c.target_kind)
   const incomeC = cents(ctbmIncome())
@@ -185,26 +203,10 @@ function render() {
           ? `Covered, ${money(incomeC - costToBeMe)} to spare`
           : `Short ${money(costToBeMe - incomeC)}`}</div>` : ''}
     </div>` : ''
-
-  // Ready to Assign is the hero, because counting it down to zero is the whole
-  // method. Spent used to lead here; spent is a fact about the past, and this
-  // number is a decision waiting to be made.
   $('summary').innerHTML = `
-    <div class="rta">
-      <div>
-        <div class="small muted">Ready to Assign</div>
-        <div class="amt num rta-${rtaK}">${money(roll.rta)}</div>
-        <div class="small muted">${
-          roll.rta < 0 ? 'More assigned than you have. Take some back.'
-          : roll.rta > 0 ? 'Give every dollar a job.'
-          : 'Every dollar has a job.'}</div>
-      </div>
-      ${state.cats.length ? '<button class="btn-quiet" id="auto-assign">Auto-assign</button>' : ''}
-    </div>
-    <div class="net">
-      <span class="num">Assigned ${money(assignedNow)}</span>
-      <span class="num">Spent ${money(totalSpent)}</span>
-    </div>${ctbm}`
+    <div class="summary-line"><span>Assigned this month</span><span class="num">${money(assignedNow)}</span></div>
+    <div class="summary-line"><span>Spent this month</span><span class="num">${money(totalSpent)}</span></div>
+    ${ctbm}`
 
   const pend = pendingRecurring()
   $('rec-banner').hidden = !pend.length
@@ -214,42 +216,58 @@ function render() {
   }
 
   $('cat-count').textContent = state.cats.length ? `${state.cats.length}` : ''
-  // The pill is Available (this month plus everything that rolled in) and carries
-  // the colour. The bar is only this month's pace -- spent against what you
-  // assigned this month -- so it stays neutral on purpose: an envelope can be
-  // over its monthly assignment and still green because last month covered it,
-  // and a red bar next to a green pill reads as a bug.
+
+  // --- avail pill (kit): the four states, quadruple-coded — fill, text color,
+  // label, and the amount's own sign — so the verdict survives color-blindness.
+  const availPill = e => {
+    const label = e.status === 'over' ? 'Overspent'
+      : e.status === 'under' ? `Needs ${money(e.needed)}`
+      : e.status === 'ok' ? 'Funded' : 'Empty'
+    return `<span class="avail s-${e.status}"><b class="num">${money(e.available)}</b><i>${label}</i></span>`
+  }
+
+  // --- cat-row (kit). The pill is Available (everything that rolled in) and
+  // carries the verdict; the bar is only this month's pace and stays neutral —
+  // an envelope can be over its monthly assignment and still green because
+  // last month covered it, and a red bar next to a green pill reads as a bug.
   const catRow = c => {
     const e = roll.cats.get(c.id)
-    // The target affordance: only categories with a target say anything. Amber
-    // ones name the shortfall (with the due date for by-date goals), funded ones
-    // just confirm it. ponytail: text, not the ring -- the progress ring is the
-    // design-engineer piece and does not gate the money logic.
+    // Target line: amber rows name the shortfall (with due date for by-date
+    // goals), funded ones confirm it. ponytail: text, not a progress ring --
+    // the ring is the design-engineer piece and does not gate the money logic.
     const tgt = c.target_kind
-      ? `<div class="tgt small ${e.needed > 0 ? 'muted' : 'tgt-met'} num">${
+      ? `<div class="cat-tgt ${e.needed > 0 ? '' : 'tgt-met'} num">${
           e.needed > 0
             ? `${money(e.needed)} to fund${c.target_kind === 'by_date' && c.target_due ? ` by ${c.target_due}` : ''}`
             : 'Target funded'}</div>`
       : ''
-    return `<div class="row">
-      <div class="cat-top">
-        <span class="cat-name">${esc(c.name)}</span>
-        <span class="pill s-${e.status}">${e.available < 0 ? `${money(-e.available)} over` : `${money(e.available)} left`}</span>
+    return `<div class="cat-row">
+      <div class="cat-name">${esc(c.name)}</div>
+      <div class="cat-meta">
+        <div class="cat-assigned">
+          <label class="cell-lbl" for="a-${c.id}">Assigned</label>
+          <input class="assign num" id="a-${c.id}" type="number" step="0.01" inputmode="decimal"
+                 value="${(e.assigned / 100).toFixed(2)}" data-assign="${c.id}" aria-label="Assigned to ${esc(c.name)}">
+        </div>
+        <div class="cat-activity">
+          <span class="cell-lbl">Activity</span>
+          <span class="num">${money(e.activity)}</span>
+        </div>
       </div>
-      <div class="assign-row">
-        <label for="a-${c.id}">Assigned</label>
-        <input class="assign num" id="a-${c.id}" type="number" step="0.01" inputmode="decimal"
-               value="${(e.assigned / 100).toFixed(2)}" data-assign="${c.id}">
-        <span class="small muted num">${e.spent ? `${money(e.spent)} spent` : 'nothing spent'}</span>
+      <div class="cat-avail">${availPill(e)}</div>
+      <div class="cat-foot">
+        <div class="cat-bar"><i style="width:${e.assigned > 0 ? Math.min(100, e.spent / e.assigned * 100) : 0}%"></i></div>
+        ${tgt}
       </div>
-      <div class="bar"><i class="f-neutral" style="width:${e.assigned > 0 ? Math.min(100, e.spent / e.assigned * 100) : 0}%"></i></div>
-      ${tgt}
     </div>`
   }
-  // Group by group_name. Ungrouped ('') renders first with no header; named
-  // groups follow alphabetically, each with a header carrying the group's total
-  // Available. ponytail: a group is just the label string (schema-v4), so this is
-  // presentation only -- rollup() never sees a group.
+
+  // --- group (kit): native <details> does the collapsing; state.closedGroups
+  // remembers what's shut because render() rebuilds this DOM on every refresh.
+  // Ungrouped ('') renders first, bare. ponytail: a group is just the label
+  // string (schema-v4), presentation only -- rollup() never sees a group. The
+  // header subtotal is Available only; per-column group subtotals are an OPUS
+  // seam (add two more .num spans to .group-sums and widen its grid).
   const groups = new Map()
   for (const c of state.cats) {
     const g = c.group_name || ''
@@ -260,36 +278,68 @@ function render() {
   $('categories').innerHTML = state.cats.length
     ? order.map(g => {
         const cats = groups.get(g)
-        const head = g
-          ? `<div class="group-head"><span>${esc(g)}</span><span class="num small">${money(cats.reduce((s, c) => s + (roll.cats.get(c.id)?.available ?? 0), 0))}</span></div>`
-          : ''
-        return head + cats.map(catRow).join('')
+        const rowsHtml = cats.map(catRow).join('')
+        if (!g) return rowsHtml
+        const avail = cats.reduce((s, c) => s + (roll.cats.get(c.id)?.available ?? 0), 0)
+        return `<details class="group" data-group="${esc(g)}"${state.closedGroups.has(g) ? '' : ' open'}>
+          <summary class="group-head">
+            <svg class="group-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 4 4 4-4 4"/></svg>
+            <span class="group-name">${esc(g)}</span>
+            <span class="group-sums num">${money(avail)}</span>
+          </summary>
+          <div class="group-body">${rowsHtml}</div>
+        </details>`
       }).join('')
     : '<div class="empty">No categories yet. Add some, then give each one a job.</div>'
 
+  // --- acct-row (kit): the Accounts screen. Today an "account" is a budget
+  // pot; the active one shows its cash balance (all income minus all expenses
+  // across loaded history, i.e. up to the viewed month's end).
+  // ponytail: other pots show no balance -- their transactions aren't loaded
+  // until you switch. Phase E real accounts replace this block wholesale.
+  const balC = state.history.reduce((s, t) => s + (t.kind === 'income' ? 1 : -1) * cents(t.amount), 0)
+  const chev = '<svg class="acct-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 4 4 4-4 4"/></svg>'
+  $('accounts').innerHTML = `
+    <div class="acct-total"><span class="small muted">Cash on hand &middot; as of ${monthLabel(state.month)}</span><b class="num">${money(balC)}</b></div>` +
+    state.budgets.map(b => {
+      const active = b.id === state.budgetId
+      return `<button class="acct-row" data-acct="${b.id}"${active ? ' aria-current="true"' : ''}>
+        <span class="acct-dot">${esc((b.name[0] || '?').toUpperCase())}</span>
+        <span class="acct-body">
+          <span class="acct-name">${esc(b.name)}</span>
+          <span class="acct-meta">${active ? 'This pot &middot; open now' : 'Tap to open this pot'}</span>
+        </span>
+        <span class="acct-bal num">${active ? money(balC) : '&mdash;'}</span>
+        ${chev}
+      </button>`
+    }).join('')
+
+  // --- txn-row (kit): the register. In select mode the row leads with a check
+  // and the body toggles selection; the per-row delete yields to the bulk bar.
   $('txn-count').textContent = state.txns.length ? `${state.txns.length}` : ''
   const catName = id => state.cats.find(c => c.id === id)?.name ?? 'Uncategorized'
-  // In select mode the row leads with a checkbox and the body toggles selection
-  // instead of opening the editor; the per-row delete gives way to the bulk bar.
   const sel = state.selMode
   $('transactions').innerHTML = state.txns.length ? state.txns.map(t => `
-    <div class="row txn${sel && state.sel.has(t.id) ? ' selected' : ''}">
+    <div class="txn-row${sel && state.sel.has(t.id) ? ' selected' : ''}">
       ${sel ? `<span class="check" aria-hidden="true">${state.sel.has(t.id) ? '&#10003;' : ''}</span>` : ''}
       ${t.flag ? `<span class="flag-dot" style="background:var(--flag-${t.flag})" title="Flag: ${t.flag}"></span>` : ''}
-      <div class="body" ${sel ? `data-sel="${t.id}"` : `data-edit="${t.id}"`} style="cursor:pointer">
-        <div class="desc">${esc(t.description) || '<span class="muted">No description</span>'}</div>
-        <div class="small muted">${t.occurred_on} &middot; ${esc(catName(t.category_id))}${t.recurring_id ? ' &middot; recurring' : ''}</div>
+      <div class="txn-body" ${sel ? `data-sel="${t.id}"` : `data-edit="${t.id}"`}>
+        <div class="txn-desc">${esc(t.description) || '<span class="muted">No description</span>'}</div>
+        <div class="txn-meta">${t.occurred_on} &middot; ${esc(catName(t.category_id))}${t.recurring_id ? ' &middot; recurring' : ''}</div>
       </div>
-      <span class="num ${t.kind === 'income' ? 'income-amt' : ''}">${t.kind === 'income' ? '+' : ''}${money(cents(t.amount))}</span>
-      ${sel ? '' : `<button class="del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>`}
+      <span class="txn-amt num${t.kind === 'income' ? ' txn-in' : ''}">${t.kind === 'income' ? '+' : '&minus;'}${money(cents(t.amount))}</span>
+      ${sel ? '' : `<button class="row-del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>`}
     </div>`).join('') : '<div class="empty">Nothing logged this month.</div>'
 
   // Bulk bar reflects the current selection; the Select toggle flips its label.
-  // The bar and the FAB share the bottom-centre slot, so only one shows at a time.
+  // The bar and the FAB share the floating slot, so only one shows at a time.
   $('bulk-bar').hidden = !sel
   $('add-btn').hidden = sel
   $('sel-toggle').textContent = sel ? 'Done' : 'Select'
   if (sel) $('bulk-count').textContent = `${state.sel.size} selected`
+
+  // OPUS: render the next screen's containers here (e.g. Reflect's report
+  // cards), reading from `roll` and state. Do not fetch inside render().
 }
 
 async function refresh() {
@@ -329,10 +379,63 @@ sb.auth.onAuthStateChange(async (_e, session) => {
   $('login').hidden = on
   $('app').hidden = !on
   $('add-btn').hidden = !on
-  if (!on) return
+  if (!on) { if (PREVIEW) previewSeed(); return }
   await loadBudgets()
   await refresh()
 })
+
+// ---------------------------------------------------------------- tabs
+
+// Five screens, one visible. Switching is pure show/hide -- render() already
+// filled every container, so tabs never refetch. The hash keeps the tab
+// across reloads (matters for Add to Home Screen).
+// OPUS: a new tab = its name here, a .tab button in the tabbar, and a
+// <section class="screen" id="screen-NAME"> -- that is the whole wiring.
+const SCREENS = ['home', 'budget', 'accounts', 'reflect', 'settings']
+function switchTab(tab) {
+  if (!SCREENS.includes(tab)) tab = 'budget'
+  state.tab = tab
+  document.body.dataset.tab = tab   // §4 CSS keys per-tab chrome off this
+  for (const s of SCREENS) {
+    const el = $('screen-' + s)
+    if (el) el.hidden = s !== tab
+  }
+  for (const b of document.querySelectorAll('.tab')) {
+    if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page')
+    else b.removeAttribute('aria-current')
+  }
+  if (location.hash !== '#' + tab) history.replaceState(null, '', '#' + tab)
+}
+document.querySelector('.tabbar').onclick = e => {
+  const b = e.target.closest('[data-tab]')
+  if (b) switchTab(b.dataset.tab)
+}
+window.addEventListener('hashchange', () => switchTab(location.hash.slice(1)))
+switchTab(location.hash.slice(1) || 'budget')
+
+// Collapse memory for category groups: <details> does the collapsing, this
+// remembers it, because render() rebuilds the DOM on every refresh. Click, not
+// the toggle event: toggle is queued async and can fire after a re-render has
+// already detached the element, losing the change. Click is synchronous and
+// runs before the default action flips `open`, so the new state is !open.
+$('categories').addEventListener('click', e => {
+  const s = e.target.closest('summary.group-head')
+  if (!s) return
+  const d = s.parentElement
+  if (d.open) state.closedGroups.add(d.dataset.group)
+  else state.closedGroups.delete(d.dataset.group)
+})
+
+// Accounts screen: tapping another pot switches to it -- same data path as the
+// header switcher, kept in sync.
+$('accounts').onclick = async e => {
+  const b = e.target.closest('[data-acct]')
+  if (!b || b.dataset.acct === state.budgetId) return
+  state.selMode = false; state.sel.clear()
+  state.budgetId = b.dataset.acct
+  $('budget-switch').value = state.budgetId
+  await refresh()
+}
 
 // ---------------------------------------------------------------- events
 
@@ -489,10 +592,10 @@ $('categories').onchange = e => {
   }])
 }
 
-// The summary's Auto-assign button opens the modes sheet. The rollup is rebuilt
-// per action rather than closed over, because the summary is re-rendered on every
-// refresh and a captured rollup would be stale.
-$('summary').onclick = e => {
+// The RTA banner's Auto-assign button opens the modes sheet. The rollup is
+// rebuilt per action rather than closed over, because the banner is re-rendered
+// on every refresh and a captured rollup would be stale.
+$('rta-banner').onclick = e => {
   if (e.target.closest('#auto-assign')) $('aa-dialog').showModal()
 }
 
@@ -571,7 +674,7 @@ function renderCats() {
     <div class="cat-edit">
       <input type="text" value="${esc(c.name)}" maxlength="40" data-name="${c.id}" aria-label="Name">
       <input type="number" value="${c.monthly_limit}" step="0.01" min="0" inputmode="decimal" data-limit="${c.id}" aria-label="Target amount">
-      <button class="del" data-delcat="${c.id}" aria-label="Delete category" style="font-size:18px;color:var(--ink-2);padding:4px 8px">&times;</button>
+      <button class="row-del" data-delcat="${c.id}" aria-label="Delete category">&times;</button>
       <select class="cat-kind" data-kind="${c.id}" aria-label="Target kind">${kindOpts(c.target_kind)}</select>
       <input type="date" class="cat-due" value="${c.target_due ?? ''}" data-due="${c.id}" aria-label="Target date"${c.target_kind === 'by_date' ? '' : ' hidden'}>
       <input type="text" class="cat-group" value="${esc(c.group_name ?? '')}" maxlength="40" list="group-list" placeholder="Group (optional)" data-group="${c.id}" aria-label="Group">
@@ -658,8 +761,8 @@ function renderRec() {
         <div class="desc">${esc(r.description)}</div>
         <div class="small muted">${cadenceLabel(r)} &middot; ${r.kind}${r.auto_apply ? ' &middot; auto' : ''}${r.category_id ? ` &middot; ${esc(state.cats.find(c => c.id === r.category_id)?.name ?? '')}` : ''}</div>
       </div>
-      <span class="num ${r.kind === 'income' ? 'income-amt' : ''}">${r.kind === 'income' ? '+' : ''}${money(cents(r.amount))}</span>
-      <button class="del" data-delrec="${r.id}" aria-label="Delete rule" style="font-size:18px;color:var(--ink-2);padding:4px 8px">&times;</button>
+      <span class="num ${r.kind === 'income' ? 'txn-in' : ''}">${r.kind === 'income' ? '+' : ''}${money(cents(r.amount))}</span>
+      <button class="row-del" data-delrec="${r.id}" aria-label="Delete rule">&times;</button>
     </div>`).join('') : '<div class="empty">No rules yet.</div>'
 }
 
@@ -789,3 +892,54 @@ $('bulk-apply').onclick = async () => {
   $('bulk-dialog').close(); setSelMode(false); refresh()
 }
 $('bulk-cancel').onclick = () => $('bulk-dialog').close()
+
+// ---------------------------------------------------------------- preview
+
+// ?preview — a dev harness like ?selftest, for working on the UI logged out.
+// It pushes fixture rows through the REAL pipeline (state -> rollup() ->
+// render()), one of each Available state, so every kit component can be seen
+// without touching live data. Look, don't touch: writes still go to Supabase
+// and will fail without a session. Never linked from the UI.
+// ponytail: fixtures are relative to the current month so the screen is never
+// stale; ids are pv-* so a stray write cannot collide with real rows.
+const PREVIEW = new URLSearchParams(location.search).has('preview')
+function previewSeed() {
+  const ms = monthStart(state.month)
+  const d = n => `${ms.slice(0, 8)}${String(n).padStart(2, '0')}`
+  const plus2 = new Date(state.month.getFullYear(), state.month.getMonth() + 2, 1)
+  const due = `${monthKey(plus2)}-15`
+  state.budgets = [{ id: 'pv-ours', name: 'Ours' }, { id: 'pv-mine', name: 'Mine' }]
+  state.budgetId = 'pv-ours'
+  state.cats = [
+    { id: 'pv-rent', name: 'Rent',       group_name: 'Fixed',    monthly_limit: 1800, target_kind: 'monthly' },
+    { id: 'pv-hyd',  name: 'Hydro',      group_name: 'Fixed',    monthly_limit: 90,   target_kind: 'monthly' },
+    { id: 'pv-groc', name: 'Groceries',  group_name: 'Everyday', monthly_limit: 0,    target_kind: null },
+    { id: 'pv-dine', name: 'Dining out', group_name: 'Everyday', monthly_limit: 0,    target_kind: null },
+    { id: 'pv-fun',  name: 'Fun money',  group_name: 'Everyday', monthly_limit: 0,    target_kind: null },
+    { id: 'pv-trip', name: 'Road trip',  group_name: 'Savings',  monthly_limit: 1200, target_kind: 'by_date', target_due: due }
+  ]
+  state.assigns = [
+    { category_id: 'pv-rent', month: ms, amount: 1800 },
+    { category_id: 'pv-hyd',  month: ms, amount: 90 },
+    { category_id: 'pv-groc', month: ms, amount: 400 },
+    { category_id: 'pv-dine', month: ms, amount: 60 },
+    { category_id: 'pv-trip', month: ms, amount: 200 }
+  ]
+  state.history = [
+    { id: 'pv-t1', category_id: null,      kind: 'income',  amount: 3200,  description: 'Paycheque',      occurred_on: d(1) },
+    { id: 'pv-t2', category_id: 'pv-rent', kind: 'expense', amount: 1800,  description: 'Rent',           occurred_on: d(1), recurring_id: 'pv-r1' },
+    { id: 'pv-t3', category_id: 'pv-groc', kind: 'expense', amount: 92.4,  description: 'Metro',          occurred_on: d(3), flag: 'green' },
+    { id: 'pv-t4', category_id: 'pv-dine', kind: 'expense', amount: 45.25, description: 'Ramen night',    occurred_on: d(6) },
+    { id: 'pv-t5', category_id: 'pv-groc', kind: 'expense', amount: 78.1,  description: 'Costco run',     occurred_on: d(9) },
+    { id: 'pv-t6', category_id: 'pv-dine', kind: 'expense', amount: 52,    description: 'Pizza',          occurred_on: d(11), flag: 'red' }
+  ].sort((a, b) => b.occurred_on.localeCompare(a.occurred_on))
+  state.txns = state.history.filter(t => t.occurred_on >= ms)
+  state.recurring = [{ id: 'pv-r1', description: 'Rent', amount: 1800, kind: 'expense', cadence: 'monthly',
+                       day_of_month: 1, category_id: 'pv-rent', active: true, auto_apply: false },
+                     { id: 'pv-r2', description: 'Internet', amount: 65, kind: 'expense', cadence: 'monthly',
+                       day_of_month: 20, category_id: 'pv-hyd', active: true, auto_apply: false }]
+  $('login').hidden = true
+  $('app').hidden = false
+  $('add-btn').hidden = false
+  render()
+}

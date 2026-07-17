@@ -1,193 +1,250 @@
-/* Budget — YNAB-modelled palette, iOS-native chrome.
-   Glass is used only on things that float ABOVE content (header, FAB, sheets),
-   per Apple's own guidance. Glass on the rows would just make the numbers
-   harder to read, and the numbers are the entire point. */
+/* ============================================================================
+   BUDGETFORUS — "Spruce & Bone" design system + component kit
+   ============================================================================
+
+   Identity: warm bone paper, petrol-teal brand, spruce-black ink.
+   Manrope carries text and tabular numbers; Bricolage Grotesque carries
+   display moments (screen titles, the Ready to Assign figure). Deliberate
+   departure from the NOTES.md "exact YNAB tokens" spec (cream/blurple/lime,
+   Figtree): the layout + information architecture are YNAB's, the skin is ours.
+
+   HOW THIS FILE IS ORGANIZED (read top to bottom once):
+     §1 TOKENS  — every design decision as a custom property. Change look here.
+     §2 BASE    — reset, typography, focus, inputs, buttons. Shared plumbing.
+     §3 KIT     — named components. Each block starts with a doc comment:
+                  WHAT it is / MARKUP to copy / TOKENS it consumes.
+     §4 SCREENS — the two built screens assembled from §3, + tab visibility.
+     §5 WIDE    — ≥768px: tab bar becomes sidebar, budget grid gains Inspector.
+     §6 PREFS   — reduced motion / reduced transparency fallbacks.
+
+   OPUS: to build a new screen, copy an existing <section class="screen"> in
+   index.html, reuse §3 blocks verbatim, and add rules ONLY in §4/§5. Never
+   invent a hex or a px size — if a value isn't a token, it doesn't exist.
+
+   CONTRAST (WCAG AA 4.5:1) — measured, not eyeballed, via a WCAG script;
+   tints are pre-composited SOLID hexes so the math can't drift at runtime:
+     ink/paper 13.42 · ink-2/paper 5.47 · ink-2/surface 6.12
+     brand/paper 6.60 · white/brand 7.38 · white/brand-press 9.28
+     ok/surface 6.65 · ok/ok-tint 5.57 · under/amber 4.77 · under/surface 7.74
+     white/over-pill 6.54 · over/surface 7.07 · none/none-tint 5.17
+     ok/rta-ok 5.14 · over/rta-over 5.34 · ink-2/rta-zero 4.98
+     ink-2/group-band 5.71 · brand/glass 6.77
+   If you change ANY color token, re-measure every pair it touches.
+   ========================================================================== */
+
+/* ================================ §1 TOKENS =============================== */
 
 :root {
-  /* YNAB palette */
-  --cream:    #FEF9ED;
-  --blurple:  #545BFE;
-  --lime:     #AEE865;
-  --navy:     #1C1F58;
-
-  --bg:       var(--cream);
+  /* --- 1a. Color — canvas + ink -------------------------------------------
+     Paper is the app canvas; surface is cards/rows sitting on it. Ink is all
+     primary text and numbers; ink-2 is meta text and passes AA on paper,
+     surface, and every baked tint below.
+     DARK STORY: paper→#15181A, surface→#1E2224, ink→#EDEBE4, ink-2→#A9B0AD;
+     every baked tint below must be re-derived and re-measured. See the
+     OPUS-DARK stub at the end of §1. */
+  --paper:    #F5F2EA;
   --surface:  #FFFFFF;
-  --line:     rgba(28, 31, 88, 0.10);
-  --ink:      var(--navy);
-  --ink-2:    #6B6F9E;
+  --ink:      #20282A;
+  --ink-2:    #5A6462;
+  --hairline: rgba(32, 40, 42, 0.10);   /* 1px separators only, never text */
 
-  /* Status. "ok" borrows the brand lime so the good case reads as on-brand
-     rather than as generic-success-green. */
-  --ok-bg:    rgba(174, 232, 101, 0.30);  --ok-fg:    #2E6B1F;
-  /* Amber = a target set but not yet funded this month (real YNAB underfunded,
-     Phase B). #8A6100 on this tint measures 4.5:1+; do not lighten either. */
-  --under-bg: rgba(255, 196, 61, 0.26);   --under-fg: #8A6100;
-  --over-bg:  rgba(224, 49, 49, 0.14);    --over-fg:  #B3261E;
-  /* Darker than --ink-2: the pill's own tinted background drags the ratio under
-     4.5 at this text size. */
-  --none-bg:  rgba(28, 31, 88, 0.07);     --none-fg:  #4B4F7D;
+  /* --- 1b. Color — brand ---------------------------------------------------
+     Petrol teal. Actions, links, selected tab, focus rings. Never a status
+     color: money verdicts belong to the state set below.
+     DARK STORY: lighten to ~#3FA8AE for text-on-dark; keep white-on-brand
+     fills, they already clear 7:1. */
+  --brand:       #0C5F66;
+  --brand-press: #0A4F55;              /* pressed fills, FAB opaque fallback */
+  --brand-tint:  rgba(12, 95, 102, 0.10);  /* washes only, never under text */
 
-  --sans: 'Figtree', -apple-system, system-ui, 'Segoe UI', sans-serif;
-  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  /* --- 1c. Color — the four Available states ------------------------------
+     The core visual language (YNAB parity). Attention states are SOLID pills;
+     calm states are colored text. All *-tint values are pre-composited solids
+     over --surface, so text-on-tint contrast is a constant, not a gamble.
+       funded (s-ok)     ok-fg text · ok-tint pill
+       underfunded (s-under) under-fg text ON amber solid pill
+       overspent (s-over)    WHITE text ON over-pill solid red
+       zero (s-none)     none-fg muted text · none-tint pill
+     DARK STORY: flip pills to tinted-dark bgs with light fgs; amber and red
+     solids can stay but re-measure their label colors on dark surface. */
+  --ok-fg:      #186A38;  --ok-tint:    #DEEFE5;
+  --under-fg:   #6B4E00;  --under-pill: #F2C64B;
+  --over-fg:    #A62A1E;  --over-pill:  #B3261E;  --over-tint: #FBE6E6;
+  --none-fg:    #5D6864;  --none-tint:  #F2F2F2;
 
-  /* Apple HIG minimum touch target. */
-  --tap: 44px;
+  /* Ready to Assign banner backgrounds — solid, composited over paper, so the
+     big number never sits on translucency (project rule). */
+  --rta-ok-bg:   #D9E6D6;
+  --rta-over-bg: #F2DBD4;
+  --rta-zero-bg: #EAE8E0;
 
-  --r-card: 16px;
-  --r-ctl:  999px;
+  /* Transaction flag palette (YNAB's six). Decorative dots, never text. */
+  --flag-red:#E0524A; --flag-orange:#E8863B; --flag-yellow:#E8C23B;
+  --flag-green:#5AA84B; --flag-blue:#4B7BE5; --flag-purple:#8A5CD6;
 
-  /* The stock CSS easings are too weak to read as intentional. These were
-     already in the file four times over as literals; they're tokens now so the
-     whole app presses and slides with one personality.
-     --ease-out   anything entering or responding to a press: starts fast, so the
-                  frame the user is watching most closely is the one that moves.
-                  Never ease-in here -- same duration, feels slower.
-     --ease-drawer  Ionic's iOS drawer curve, for the sheets only. */
+  /* --- 1d. Type ------------------------------------------------------------
+     Manrope for everything readable; numbers add tabular-nums so columns
+     align. Bricolage Grotesque ONLY for display moments (login title, screen
+     titles, the RTA figure) — if you're unsure, it's Manrope.
+     Scale is fixed; do not add sizes between the steps. 16px is also the iOS
+     no-zoom input floor. */
+  --font: 'Manrope', -apple-system, system-ui, 'Segoe UI', sans-serif;
+  --font-display: 'Bricolage Grotesque', var(--font);
+  --fs-rta:     32px;   /* the one hero number */
+  --fs-title:   28px;   /* screen titles */
+  --fs-section: 17px;   /* section + group headers */
+  --fs-body:    16px;   /* names, register text, inputs, money */
+  --fs-meta:    13px;   /* dates, hints, secondary */
+  --fs-micro:   11px;   /* state labels, column headers — bold only */
+
+  /* --- 1e. Space -----------------------------------------------------------
+     4px base. Components use these steps, nothing in between. */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
+
+  /* --- 1f. Radii -----------------------------------------------------------
+     Soft rectangles, not capsules (departure from the old pill-shaped
+     buttons). Full-round is reserved for the Available pill, chips, dots. */
+  --r-ctl:   12px;   /* buttons, inputs */
+  --r-card:  16px;   /* cards, row lists */
+  --r-sheet: 20px;   /* bottom sheets (top corners) */
+  --r-pill:  999px;  /* Available pill, chips, flag dots */
+
+  /* --- 1g. Elevation -------------------------------------------------------
+     Content is FLAT: cards get a whisper of lift, that's all. Real shadows
+     belong to floating chrome (FAB, sheets, bulk bar). */
+  --shadow-card:  0 1px 2px rgba(32, 40, 42, 0.04), 0 6px 20px rgba(32, 40, 42, 0.05);
+  --shadow-float: 0 6px 24px rgba(32, 40, 42, 0.22);
+
+  /* --- 1h. Motion ----------------------------------------------------------
+     One personality: fast out, calm in.
+     --ease-out    presses + anything entering. Starts fast — the frame the
+                   user watches hardest is the first one.
+     --ease-drawer iOS drawer curve, sheets only.
+     Press feedback stays 100–160ms; slower reads as lag. */
   --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-
-  /* Press feedback lives at 100-160ms. Slower reads as lag on the one
-     interaction that must feel instant. */
   --t-press: 140ms;
+  --t-sheet-in: 340ms;
+  --t-sheet-out: 220ms;
+
+  /* --- 1i. Layout metrics --------------------------------------------------
+     --tap is Apple HIG minimum; nothing tappable may be smaller. */
+  --tap: 44px;
+  --tabbar-h: 58px;
+  --maxw: 640px;       /* content column, phone + centered narrow desktop */
+  --sidebar-w: 224px;  /* §5 wide shell */
+  --inspector-w: 296px;
+
+  /* OPUS-DARK: dark theme attaches HERE, nowhere else — re-declare tokens
+     under the media query, re-measure every ratio in the header, done:
+     @media (prefers-color-scheme: dark) { :root { --paper: #15181A; ... } }
+     Do not scatter dark overrides through §3/§4. */
 }
+
+/* ================================ §2 BASE ================================= */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { -webkit-text-size-adjust: 100%; }
 
 body {
-  background: var(--bg);
+  background: var(--paper);
   color: var(--ink);
-  font-family: var(--sans);
-  line-height: 1.55;
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;  /* kill the grey flash on tap */
-  overscroll-behavior-y: none;               /* no rubber-band on the body */
-  padding:
-    env(safe-area-inset-top) env(safe-area-inset-right)
-    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
 }
 
-/* Something for the glass to actually pick up. Flat cream behind a blur looks
-   like flat cream; these give the header and FAB a hint of colour to refract. */
-body::before {
-  content: '';
-  position: fixed; inset: 0;
-  pointer-events: none;
-  z-index: -1;
-  background:
-    radial-gradient(60vw 60vw at 12% -10%, rgba(84, 91, 254, 0.10), transparent 70%),
-    radial-gradient(50vw 50vw at 95% 8%, rgba(174, 232, 101, 0.14), transparent 70%);
-}
+h1, h2 { line-height: 1.12; letter-spacing: -0.02em; }
+h1 { font-family: var(--font-display); font-size: var(--fs-title); font-weight: 700; }
+h2 { font-size: var(--fs-section); font-weight: 700; }
 
-.wrap { max-width: 640px; margin: 0 auto; padding: 0 16px 120px; }
+/* Money numbers: tabular so columns of figures align digit-for-digit. */
+.num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 
-h1, h2 { font-weight: 800; letter-spacing: -0.025em; line-height: 1.12; }
-h1 { font-size: 40px; }
-h2 { font-size: 19px; }
-
-.num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-
-/* Hide-amounts: glance privacy on a shared phone. Blur every money value, keep
-   the layout intact. NOT security -- the numbers are still in the DOM. The
-   transition only fires on toggle: render() rebuilds these nodes, so on a normal
-   refresh there is no previous value to animate from. */
-.num, .pill { transition: filter 160ms var(--ease-out); }
-body.amounts-hidden .num,
-body.amounts-hidden .pill { filter: blur(7px); -webkit-user-select: none; user-select: none; }
 .muted { color: var(--ink-2); }
-.small { font-size: 13px; }
+.small { font-size: var(--fs-meta); }
 
-/* ---------------------------------------------------------------- glass */
+/* Hide-amounts: glance privacy on a shared phone — blur every money value,
+   keep layout. NOT security; the numbers are still in the DOM. */
+.num, .avail { transition: filter 160ms var(--ease-out); }
+body.amounts-hidden .num,
+body.amounts-hidden .avail { filter: blur(7px); -webkit-user-select: none; user-select: none; }
 
-/* saturate() is what sells it — Apple's material boosts the colour behind it.
-   Blur alone reads as frosted plastic. */
-.glass {
-  background: rgba(254, 249, 237, 0.68);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
+[hidden] { display: none !important; }
+
+/* Focus: one ring, everywhere, keyboard only. */
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* Touch devices fire :hover on tap and leave it stuck. Every hover in this
+   file lives inside this gate. */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover        { filter: brightness(1.12); }
+  .btn-quiet:hover  { background-color: rgba(32, 40, 42, 0.09); }
+  .btn-danger:hover { background-color: var(--over-tint); }
+  .row-del:hover    { background-color: var(--over-tint); color: var(--over-fg); }
+  .tab:hover        { color: var(--ink); }
+  .acct-row:hover, .txn-row .txn-body:hover { background-color: rgba(32, 40, 42, 0.03); }
 }
 
-/* Reduce Transparency is a real iOS accessibility setting, and people who turn
-   it on are not asking politely. Fall back to opaque. */
-@media (prefers-reduced-transparency: reduce) {
-  .glass, header, .fab, .sheet, dialog::backdrop {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-  }
-  header, .sheet { background: var(--surface) !important; }
-  .fab { background: var(--blurple) !important; }
-}
-
-/* ---------------------------------------------------------------- controls */
-
+/* ---- controls: buttons ----------------------------------------------------
+   KIT: .btn (filled, primary) · .btn-quiet (tinted, secondary) ·
+        .btn-danger (destructive text) · .icon-btn (44px square glyph)
+   MARKUP  <button class="btn">Save</button>
+   TOKENS  brand, brand-press, r-ctl, tap, t-press, ease-out
+   Every pressable thing scales to 0.96 on :active — deeper reads as a glitch,
+   nothing reads as ignoring the tap. */
 button {
   font: inherit; cursor: pointer; border: none; background: none; color: inherit;
-  touch-action: manipulation;  /* no 300ms double-tap-zoom delay */
+  touch-action: manipulation;
 }
-
 .btn {
-  background: var(--blurple);
+  background: var(--brand);
   color: #fff;
   border-radius: var(--r-ctl);
-  padding: 12px 20px;
+  padding: 12px var(--s5);
   min-height: var(--tap);
-  font-size: 15px; font-weight: 600;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),   /* specular top edge */
-    0 4px 14px rgba(84, 91, 254, 0.26);
-  transition: transform var(--t-press) var(--ease-out), filter var(--t-press) ease;
+  font-size: 15px; font-weight: 700;
+  transition: transform var(--t-press) var(--ease-out), filter var(--t-press) ease, background-color var(--t-press) ease;
 }
-.btn:active { transform: scale(0.96); }
+.btn:active { transform: scale(0.96); background: var(--brand-press); }
 
 .btn-quiet {
-  background-color: rgba(28, 31, 88, 0.05);
+  background-color: rgba(32, 40, 42, 0.06);
   border-radius: var(--r-ctl);
-  padding: 10px 16px;
+  padding: 10px var(--s4);
   min-height: var(--tap);
-  font-size: 14px; font-weight: 600;
+  font-size: 14px; font-weight: 700;
   color: var(--ink);
   transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
 }
 .btn-quiet:active { transform: scale(0.96); }
 
-.icon-btn { padding: 0; width: var(--tap); font-size: 20px; font-weight: 500; line-height: 1; }
-
-/* Every pressable thing scales on :active. Without it the interface gives no
-   sign it heard the tap until the data comes back. 0.96 is deliberate -- deeper
-   than ~0.95 stops reading as a press and starts reading as a glitch. */
-.icon-btn:active, .btn-danger:active, .del:active { transform: scale(0.96); }
-
-/* Buttons had no focus style at all, so keyboard users got whatever the UA drew
-   on top of a custom-painted control. :focus-visible, so it never shows on tap. */
-button:focus-visible {
-  outline: 2px solid var(--blurple);
-  outline-offset: 3px;
+.btn-danger {
+  color: var(--over-fg);
+  font-size: var(--fs-meta); font-weight: 700;
+  padding: 12px 18px; min-height: var(--tap);
+  border-radius: var(--r-ctl);
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
 }
+.icon-btn { padding: 0; width: var(--tap); min-height: var(--tap); font-size: 20px; font-weight: 500; line-height: 1; border-radius: var(--r-ctl); }
+.icon-btn:active, .btn-danger:active, .row-del:active { transform: scale(0.96); }
 
-/* Touch devices fire :hover on tap and then LEAVE IT STUCK until you tap
-   something else. This app is phone-first, so every hover in the file is gated
-   behind a real pointer. */
-@media (hover: hover) and (pointer: fine) {
-  .btn:hover        { filter: brightness(1.08); }
-  .btn-quiet:hover  { background-color: rgba(28, 31, 88, 0.09); }
-  .month button:hover { background-color: rgba(28, 31, 88, 0.09); }
-  .btn-danger:hover { background-color: var(--over-bg); }
-  .txn .del:hover, .rec-edit .del:hover, .cat-edit .del:hover {
-    background-color: var(--over-bg); color: var(--over-fg);
-  }
-}
-
+/* ---- controls: fields -----------------------------------------------------
+   KIT: .field — label over control. 16px font is the iOS no-zoom floor.
+   MARKUP  <div class="field"><label for="x">Date</label><input id="x"></div>
+   TOKENS  fs-body, tap, r-ctl, brand (focus) */
 input, select {
   font: inherit;
-  font-size: 16px;              /* below 16 and iOS zooms the page on focus */
+  font-size: var(--fs-body);          /* below 16 and iOS zooms on focus */
   width: 100%;
   min-height: var(--tap);
-  /* background-color, not the background shorthand: the shorthand resets
-     background-image, which is where the select chevron lives. */
-  background-color: rgba(28, 31, 88, 0.04);
+  background-color: rgba(32, 40, 42, 0.045);
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--r-ctl);
   padding: 11px 14px;
   color: var(--ink);
   -webkit-appearance: none;
@@ -196,368 +253,598 @@ input, select {
 }
 input:focus, select:focus {
   outline: none;
-  border-color: var(--blurple);
+  border-color: var(--brand);
   background-color: var(--surface);
-  box-shadow: 0 0 0 4px rgba(84, 91, 254, 0.15);
+  box-shadow: 0 0 0 4px var(--brand-tint);
 }
-
-/* appearance:none strips the native chevron, and nothing had put one back --
-   so every menu in the app rendered as flat text with no sign it opened
-   anything. The affordance IS the control; without it the budget switcher is
-   invisible furniture. */
+/* Selects keep a chevron (appearance:none strips the native one). */
 select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236B6F9E' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.5l4 4 4-4'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235A6462' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.5l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 16px;
   padding-right: 36px;
   cursor: pointer;
 }
-
-label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(--ink-2); margin-bottom: 6px; }
 .field + .field { margin-top: 14px; }
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-top: 14px; }
 
-/* ---------------------------------------------------------------- chrome */
+/* ================================ §3 KIT ================================== */
 
-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 0;
-  position: sticky; top: 0; z-index: 5;
-  background: rgba(254, 249, 237, 0.72);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-  box-shadow: 0 1px 0 var(--line);
+/* ---- glass -----------------------------------------------------------------
+   Chrome ONLY: app bar, tab bar, FAB, sheets, bulk bar. NEVER content rows or
+   anything holding a number — numbers sit on solid fills. saturate() is what
+   sells the material; blur alone reads as frosted plastic. */
+.glass {
+  background: rgba(245, 242, 234, 0.78);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
 }
-/* The budget switcher is the only navigation in the app, so it reads as a title
-   with a chevron rather than as a form control -- but it still has to say
-   "I open something". Tighter chevron gap than the sheet selects: this one
-   hangs off the text, it isn't sitting in a filled box. */
-header select {
-  width: auto; flex: 1;
-  background-color: transparent; border: none;
-  font-weight: 700; font-size: 17px;
-  padding-left: 2px; padding-right: 24px;
-  min-height: var(--tap);
-  background-position: right 2px center;
-}
-header select:focus { box-shadow: none; background-color: transparent; }
-header select:focus-visible { outline: 2px solid var(--blurple); outline-offset: 2px; border-radius: 8px; }
 
-.month { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 16px; }
-.month button {
-  width: var(--tap); height: var(--tap);
-  border-radius: 50%;
-  background-color: rgba(28, 31, 88, 0.05);
-  font-size: 20px; line-height: 1;
-  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
-}
-/* Was 0.9 -- a 44px circle collapsing by 4px reads as the button breaking, not
-   as a press. Matches every other control now. */
-.month button:active { transform: scale(0.96); }
-
-.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 26px 0 10px; }
-
-/* ---------------------------------------------------------------- cards */
-
+/* ---- card -------------------------------------------------------------------
+   KIT: .card — a white panel on paper. Rows lists use .rows instead.
+   MARKUP  <div class="card">…</div>
+   TOKENS  surface, r-card, shadow-card */
 .card {
   background: var(--surface);
   border-radius: var(--r-card);
-  padding: 18px;
-  box-shadow: 0 1px 2px rgba(28, 31, 88, 0.04), 0 8px 24px rgba(28, 31, 88, 0.04);
+  padding: var(--s4);
+  box-shadow: var(--shadow-card);
 }
 
-/* Ready to Assign. The number the whole method counts down to zero, so it gets
-   the size the old total-spent number had. */
-.rta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.rta .amt { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; }
-.rta .btn-quiet { flex: none; white-space: nowrap; }
-.rta-ok   { color: var(--ok-fg); }
-.rta-over { color: var(--over-fg); }
-.rta-none { color: var(--ink-2); }
-
-.net {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line);
-  font-size: 13px; color: var(--ink-2);
+/* ---- rows -------------------------------------------------------------------
+   KIT: .rows — a hairline-separated list panel (categories, register, pots).
+   MARKUP  <div class="rows"> …row components… </div>
+   TOKENS  surface, r-card, hairline, shadow-card */
+.rows {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
 }
+.rows > * + *, .group-body > * + * { border-top: 1px solid var(--hairline); }
 
-.banner {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  margin-top: 12px;
-  background: rgba(84, 91, 254, 0.07);
-  box-shadow: none;
-  padding: 14px 14px 14px 16px;
+/* ---- appbar -----------------------------------------------------------------
+   KIT: the sticky glass header. Three stacked rows:
+     .appbar-top   budget switcher (reads as a title) + icon actions
+     .appbar-month ‹ Month Year › stepper
+     #rta-banner   the Ready to Assign banner (kit block below)
+   MARKUP  <header class="appbar glass"> <div class="appbar-top">…
+   TOKENS  glass, hairline, tap, fs-section
+   OPUS: screens that don't need month context hide rows via §4 body[data-tab]
+   rules — do not remove them from the DOM. */
+.appbar {
+  position: sticky; top: 0; z-index: 20;
+  padding: calc(env(safe-area-inset-top) + var(--s1)) var(--s4) var(--s2);
+  box-shadow: 0 1px 0 var(--hairline);
 }
-.banner .btn { padding: 10px 16px; font-size: 14px; white-space: nowrap; }
-
-.bar { height: 6px; border-radius: 3px; background: rgba(28, 31, 88, 0.07); overflow: hidden; margin-top: 12px; }
-/* No width transition here, and that's deliberate. It used to have one, and it
-   had never once fired: render() replaces innerHTML, so this element is always
-   brand new and a transition needs a value to change FROM. Making it work with
-   @starting-style is easy and wrong -- every refresh rebuilds these, so the
-   bars would replay their fill on every keystroke-commit of an assigned amount.
-   An animation you see that often stops being feedback and becomes noise. */
-.bar > i { display: block; height: 100%; border-radius: 3px; }
-
-.rows { border-radius: var(--r-card); background: var(--surface); overflow: hidden; box-shadow: 0 1px 2px rgba(28, 31, 88, 0.04), 0 8px 24px rgba(28, 31, 88, 0.04); }
-.rows > * + * { border-top: 1px solid var(--line); }
-.row { padding: 15px 16px; }
-
-.cat-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.cat-name { font-weight: 600; }
-
-.pill {
-  font-size: 11px; font-weight: 700;
-  letter-spacing: 0.02em;
-  border-radius: var(--r-ctl);
-  padding: 4px 10px;
-  white-space: nowrap;
+.appbar-top { display: flex; align-items: center; gap: var(--s1); }
+/* The switcher is navigation dressed as a title — transparent, bold, chevron. */
+.appbar-top select {
+  width: auto; flex: 1; min-width: 0;
+  background-color: transparent; border: none;
+  font-weight: 800; font-size: var(--fs-section);
+  padding: 8px 24px 8px 2px;
+  background-position: right 2px center;
 }
-
-.s-ok    { background: var(--ok-bg);    color: var(--ok-fg); }
-.s-under { background: var(--under-bg); color: var(--under-fg); }
-.s-over  { background: var(--over-bg);  color: var(--over-fg); }
-.s-none  { background: var(--none-bg);  color: var(--none-fg); }
-.f-ok    { background: var(--ok-fg); }
-.f-under { background: var(--under-fg); }
-.f-over  { background: var(--over-fg); }
-.f-none  { background: var(--none-fg); }
-
-/* Target line under a category: the shortfall (muted) or a funded confirmation
-   (amber-green). Only categories with a target render it. */
-.tgt { margin-top: 8px; }
-.tgt-met { color: var(--ok-fg); font-weight: 600; }
-
-/* Cost to Be Me: a small ledger under the Assigned/Spent line. The verdict reads
-   green when income covers the plan, amber when it falls short. */
-.ctbm { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
-.ctbm-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.ctbm-row input { width: 120px; flex: none; text-align: right; }
-.ctbm-verdict { font-weight: 700; }
-.ctbm-verdict.ok    { color: var(--ok-fg); }
-.ctbm-verdict.short { color: var(--under-fg); }
-/* The category bar is pace, not a verdict — the pill next to it is the verdict.
-   See the comment on the category render for why this one isn't allowed a colour. */
-.f-neutral { background: rgba(84, 91, 254, 0.55); }
-
-/* The assigned box sits in the row, not behind a sheet: assigning is the thing
-   you came to do, and a tap-to-open-a-sheet per category makes a month of it. */
-.assign-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-.assign-row label { margin-bottom: 0; flex: none; }
-input.assign { width: 106px; flex: none; text-align: right; }
-
-.txn { display: flex; align-items: center; gap: 12px; }
-.txn .body { flex: 1; min-width: 0; }
-.txn .desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.txn .del, .rec-edit .del, .cat-edit .del {
+.appbar-top select:focus { box-shadow: none; background-color: transparent; }
+.appbar-month { display: flex; align-items: center; justify-content: space-between; padding: var(--s1) 0; }
+.appbar-month h1 { font-size: 22px; }
+.month-btn {
   width: var(--tap); height: var(--tap);
-  flex: none;
+  border-radius: 50%;
+  background-color: rgba(32, 40, 42, 0.06);
+  font-size: 20px; line-height: 1;
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
+}
+.month-btn:active { transform: scale(0.96); }
+
+/* ---- rta-banner ---------------------------------------------------------------
+   KIT: the Ready to Assign strip. SOLID state-tinted fill inside the glass
+   header so the number never sits on blur. Three states via a class on the
+   banner: rta-ok (money to assign) · rta-over (assigned too much) ·
+   rta-zero (every dollar has a job).
+   MARKUP  (render() writes this)
+     <div class="rta-banner rta-ok">
+       <div class="rta-text"><span class="rta-label">Ready to Assign</span>
+         <span class="rta-amt num">$120.00</span>
+         <span class="rta-hint">Give every dollar a job.</span></div>
+       <button class="btn-quiet" id="auto-assign">Auto-assign</button>
+     </div>
+   TOKENS  rta-*-bg, ok-fg/over-fg/ink-2, fs-rta, r-card */
+.rta-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  border-radius: var(--r-card);
+  padding: var(--s3) var(--s4);
+  margin-top: var(--s2);
+}
+.rta-label { display: block; font-size: var(--fs-micro); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.rta-amt { display: block; font-family: var(--font-display); font-size: var(--fs-rta); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.rta-hint { display: block; font-size: var(--fs-meta); font-weight: 600; }
+.rta-banner .btn-quiet { flex: none; background-color: rgba(255, 255, 255, 0.65); }
+.rta-ok   { background: var(--rta-ok-bg); }
+.rta-ok   .rta-label, .rta-ok .rta-amt, .rta-ok .rta-hint { color: var(--ok-fg); }
+.rta-over { background: var(--rta-over-bg); }
+.rta-over .rta-label, .rta-over .rta-amt, .rta-over .rta-hint { color: var(--over-fg); }
+.rta-zero { background: var(--rta-zero-bg); }
+.rta-zero .rta-label, .rta-zero .rta-amt, .rta-zero .rta-hint { color: var(--ink-2); }
+
+/* ---- tabbar --------------------------------------------------------------------
+   KIT: the five-tab bottom nav (phone). Becomes the sidebar in §5 — same DOM.
+   MARKUP  <nav class="tabbar glass"><button class="tab" data-tab="budget"
+             aria-current="page"><svg…></svg><span>Budget</span></button>×5</nav>
+   TOKENS  glass, tabbar-h, tap, brand, ink-2, fs-micro
+   OPUS: a new tab = one .tab button here + one .screen section + one line in
+   app.js SCREENS. Icons are inline SVG, stroke currentColor, 24×24. */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -1px 0 var(--hairline);
+}
+.tab {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  min-height: var(--tap);
+  color: var(--ink-2);
+  font-size: var(--fs-micro); font-weight: 700;
+  transition: color var(--t-press) ease, transform var(--t-press) var(--ease-out);
+}
+.tab:active { transform: scale(0.94); }
+.tab svg { width: 24px; height: 24px; }
+.tab[aria-current="page"] { color: var(--brand); }
+
+/* ---- screen ---------------------------------------------------------------------
+   KIT: one tab's content. Only one is visible; app.js toggles [hidden] and
+   body[data-tab]. Content column centers at --maxw.
+   MARKUP  <section class="screen" id="screen-budget" data-screen="budget">…
+   TOKENS  maxw, tabbar-h */
+main { display: block; }
+.screen {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: var(--s4) var(--s4) calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 88px);
+}
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin: var(--s6) 0 var(--s2); }
+.section-head:first-child { margin-top: 0; }
+
+/* ---- group -----------------------------------------------------------------------
+   KIT: collapsible category group. Native <details> — collapse costs no JS;
+   app.js only remembers which names are closed across re-renders.
+   MARKUP  (render() writes this)
+     <details class="group" open data-group="Fixed">
+       <summary class="group-head">
+         <svg class="group-chev">…</svg><span class="group-name">Fixed</span>
+         <span class="group-sums num">$310.00</span>
+       </summary>
+       <div class="group-body"> …cat-row×n… </div>
+     </details>
+   TOKENS  fs-micro, ink-2, hairline */
+.group summary { list-style: none; cursor: pointer; }
+.group summary::-webkit-details-marker { display: none; }
+.group-head {
+  display: flex; align-items: center; gap: var(--s2);
+  min-height: var(--tap);
+  padding: var(--s2) var(--s4);
+  background: #F7F7F8;   /* baked band; ink-2 on it measures 5.71 */
+  font-size: var(--fs-micro); font-weight: 800;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.group-chev { width: 14px; height: 14px; flex: none; transition: transform 160ms var(--ease-out); }
+.group[open] .group-chev { transform: rotate(90deg); }
+.group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-sums { font-weight: 700; letter-spacing: 0; text-transform: none; font-size: var(--fs-meta); }
+
+/* ---- cat-row ----------------------------------------------------------------------
+   KIT: the atomic Budget unit — name, Assigned (inline editable), Activity,
+   Available. Phone stacks name+pill over the meta line; §5 lays the same DOM
+   out as four table columns.
+   MARKUP  (render() writes this; keep the class grid EXACTLY)
+     <div class="cat-row">
+       <div class="cat-name">Groceries</div>
+       <div class="cat-meta">
+         <div class="cat-assigned"><label class="cell-lbl" for="a-ID">Assigned</label>
+           <input class="assign num" id="a-ID" data-assign="ID" …></div>
+         <div class="cat-activity"><span class="cell-lbl">Activity</span>
+           <span class="num">−$255.00</span></div>
+       </div>
+       <div class="cat-avail"> …avail pill kit block… </div>
+       <div class="cat-foot"> <div class="cat-bar">…</div> <div class="cat-tgt">…</div> </div>
+     </div>
+   TOKENS  s-*, fs-body/meta/micro, tap
+   .cat-meta is a flex line on phone and display:contents on wide, which is
+   what lets the SAME DOM read as stacked card there and table row here. */
+.cat-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "name avail" "meta avail" "foot foot";
+  align-items: center;
+  column-gap: var(--s3);
+  padding: var(--s3) var(--s4);
+}
+.cat-name { grid-area: name; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-avail { grid-area: avail; text-align: right; }
+.cat-meta { grid-area: meta; display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-top: var(--s1); min-width: 0; }
+.cat-assigned, .cat-activity { display: flex; align-items: center; gap: var(--s2); }
+.cell-lbl { font-size: var(--fs-micro); font-weight: 700; color: var(--ink-2); margin: 0; }
+.cat-activity .num { font-size: var(--fs-meta); color: var(--ink-2); }
+input.assign { width: 104px; min-height: var(--tap); padding: 6px 10px; text-align: right; font-weight: 600; }
+/* Foot: pace bar and/or target line, full width under the row. */
+.cat-foot { grid-area: foot; min-width: 0; }
+/* Target line: shortfall (muted) or funded confirmation. Only targeted rows. */
+.cat-tgt { font-size: var(--fs-meta); font-weight: 600; color: var(--ink-2); margin-top: var(--s1); white-space: normal; }
+.cat-tgt.tgt-met { color: var(--ok-fg); }
+/* Pace bar: this month's spend vs assigned. Neutral on purpose — the pill is
+   the verdict, the bar is only pace, and a red bar beside a green pill reads
+   as a bug. */
+.cat-bar { height: 4px; border-radius: 2px; background: rgba(32, 40, 42, 0.07); overflow: hidden; margin-top: var(--s2); }
+.cat-bar > i { display: block; height: 100%; border-radius: 2px; background: rgba(12, 95, 102, 0.45); }
+
+/* ---- avail pill --------------------------------------------------------------------
+   KIT: the Available cell — amount + micro state label, quadruple-coded
+   (color, label, fill, sign) so the four states survive color-blindness.
+     s-ok    funded       tinted green pill, green text, "Funded"
+     s-under underfunded  SOLID amber pill, dark text, "Needs $X"
+     s-over  overspent    SOLID red pill, white text, "Overspent"
+     s-none  zero         gray tinted pill, muted text, "Empty"
+   MARKUP  (render() writes this)
+     <span class="avail s-ok"><b class="num">$45.00</b><i>Funded</i></span>
+   TOKENS  ok/under/over/none pairs, r-pill, fs-micro */
+.avail {
+  display: inline-flex; flex-direction: column; align-items: flex-end;
+  border-radius: var(--r-pill);
+  padding: 5px 12px;
+}
+.avail b { font-weight: 800; font-size: var(--fs-body); line-height: 1.2; }
+.avail i { font-style: normal; font-size: var(--fs-micro); font-weight: 700; line-height: 1.3; }
+.s-ok    { background: var(--ok-tint);    color: var(--ok-fg); }
+.s-under { background: var(--under-pill); color: var(--under-fg); }
+.s-over  { background: var(--over-pill);  color: #fff; }
+.s-none  { background: var(--none-tint);  color: var(--none-fg); }
+
+/* ---- acct-row -----------------------------------------------------------------------
+   KIT: one pot/account in the Accounts list. The active budget shows its live
+   balance; the others switch on tap (real budget-switch data path).
+   MARKUP  (render() writes this)
+     <button class="acct-row" data-acct="ID" aria-current="true">
+       <span class="acct-dot num">N</span>
+       <span class="acct-body"><span class="acct-name">Ours</span>
+         <span class="acct-meta">Cash · as of July 2026</span></span>
+       <span class="acct-bal num">$1,240.00</span>
+       <svg class="acct-chev">…</svg>
+     </button>
+   TOKENS  brand, ink-2, tap, fs-body/meta
+   OPUS: Phase E real accounts render here — same row, one account per row,
+   balance from the accounts table instead of the pot rollup. */
+.acct-row {
+  display: flex; align-items: center; gap: var(--s3);
+  width: 100%; text-align: left;
+  min-height: 60px;
+  padding: var(--s3) var(--s4);
+  transition: background-color var(--t-press) ease;
+}
+.acct-dot {
+  flex: none; width: 36px; height: 36px; border-radius: var(--r-pill);
+  display: grid; place-items: center;
+  background: var(--brand); color: #fff;
+  font-weight: 800; font-size: 15px;
+}
+.acct-row:not([aria-current]) .acct-dot { background: rgba(32, 40, 42, 0.12); color: var(--ink); }
+.acct-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.acct-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-meta { font-size: var(--fs-meta); color: var(--ink-2); }
+.acct-bal { font-weight: 800; }
+.acct-chev { width: 16px; height: 16px; flex: none; color: var(--ink-2); }
+
+/* ---- txn-row ------------------------------------------------------------------------
+   KIT: one register line. Flag dot → body (payee + date·category) → amount →
+   delete. Select mode swaps the delete for a leading check and the body
+   toggles selection (app.js drives, same as before).
+   MARKUP  (render() writes this)
+     <div class="txn-row [selected]">
+       [<span class="check">✓</span>] [<span class="flag-dot" style="background:var(--flag-red)"></span>]
+       <div class="txn-body" data-edit="ID"><div class="txn-desc">Metro</div>
+         <div class="txn-meta">2026-07-12 · Groceries</div></div>
+       <span class="txn-amt num [txn-in]">−$45.00</span>
+       <button class="row-del" data-del="ID">×</button>
+     </div>
+   TOKENS  ok-fg (income), over-tint (delete hover), brand-tint (selected) */
+.txn-row { display: flex; align-items: center; gap: var(--s3); padding: 10px var(--s4); min-height: 60px; }
+.txn-body { flex: 1; min-width: 0; cursor: pointer; border-radius: var(--s2); }
+.txn-desc { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.txn-meta { font-size: var(--fs-meta); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.txn-amt { font-weight: 700; }
+.txn-in  { color: var(--ok-fg); }
+.flag-dot { width: 10px; height: 10px; border-radius: var(--r-pill); flex: none; }
+.row-del {
+  width: var(--tap); height: var(--tap); flex: none;
   border-radius: 50%;
   color: var(--ink-2); font-size: 20px;
   display: grid; place-items: center;
-  transition: transform var(--t-press) var(--ease-out),
-              background-color var(--t-press) ease,
-              color var(--t-press) ease;
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease, color var(--t-press) ease;
 }
-/* The :hover for these lives in the gated hover block up in controls. */
-
-.income-amt { color: var(--ok-fg); font-weight: 700; }
-
-/* Transaction flags: YNAB's six colours, a small dot at the row's leading edge. */
-:root {
-  --flag-red:#E0524A; --flag-orange:#E8863B; --flag-yellow:#E8C23B;
-  --flag-green:#5AA84B; --flag-blue:#4B7BE5; --flag-purple:#8A5CD6;
-}
-.flag-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-
-/* ---------------------------------------------------------------- phase C */
-
-/* Recurring: the auto-apply opt-in, a checkbox row under the cadence fields. */
-.rec-auto { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14px; }
-.rec-auto input { width: 20px; height: 20px; flex: none; accent-color: var(--blurple); }
-
-/* Money Moves: from -> to reads green when an envelope got more, amber when it
-   gave some back. Same tokens as the envelope verdicts, so the trail matches. */
-.move-up   { color: var(--ok-fg); }
-.move-down { color: var(--under-fg); }
-
-/* Bulk select: a check column appears at the row's leading edge in select mode,
-   and the selected row lifts onto a faint blurple wash. */
-.txn .check {
+.check {
   flex: none; width: 22px; height: 22px; border-radius: 6px;
-  border: 1.5px solid var(--line); display: grid; place-items: center;
-  font-size: 13px; color: #fff; background: var(--surface);
+  border: 1.5px solid var(--hairline); display: grid; place-items: center;
+  font-size: var(--fs-meta); color: #fff; background: var(--surface);
 }
-.txn.selected { background: rgba(84, 91, 254, 0.09); border-radius: 12px; }
-.txn.selected .check { background: var(--blurple); border-color: var(--blurple); }
+.txn-row.selected { background: var(--brand-tint); }
+.txn-row.selected .check { background: var(--brand); border-color: var(--brand); }
 
-/* The bulk action bar sits where the FAB does, replacing it while selecting. */
+/* ---- toolbar -------------------------------------------------------------------------
+   KIT: the register's quiet action strip (Select / Export / Moves / Recurring).
+   MARKUP  <div class="toolbar"><button class="btn-quiet">…</button>×n</div> */
+.toolbar { display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end; }
+.toolbar .btn-quiet { padding: 8px var(--s3); min-height: 38px; font-size: var(--fs-meta); }
+
+/* ---- fab ------------------------------------------------------------------------------
+   KIT: Add Transaction, floating above the tab bar, thumb side. Glass edge
+   over a near-opaque brand fill — white-on-fill measured 7.38 (the old glass
+   FAB shipped at 3.89 before it got caught; alpha stays ≥0.92).
+   MARKUP  <button class="fab" id="add-btn">＋ Add</button>
+   TOKENS  brand, shadow-float, tabbar-h, r-pill */
+.fab {
+  position: fixed; right: var(--s4);
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s3));
+  z-index: 16;
+  min-height: 52px;
+  padding: 14px var(--s6);
+  border-radius: var(--r-pill);
+  background: rgba(12, 95, 102, 0.94);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  color: #fff; font-size: 15px; font-weight: 800;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), var(--shadow-float);
+  transition: transform var(--t-press) var(--ease-out), filter var(--t-press) ease;
+}
+.fab:active { transform: scale(0.96); }
+
+/* ---- bulk-bar ---------------------------------------------------------------------------
+   KIT: floating action bar that REPLACES the FAB while selecting transactions.
+   MARKUP  static in index.html (#bulk-bar); app.js toggles it with the FAB. */
 .bulk-bar {
   position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: calc(20px + env(safe-area-inset-bottom));
-  z-index: 11; display: flex; align-items: center; gap: 14px;
-  padding: 10px 14px 10px 18px; border-radius: var(--r-ctl);
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s3));
+  z-index: 16; display: flex; align-items: center; gap: var(--s3);
+  padding: 10px 14px 10px 18px; border-radius: var(--r-pill);
   max-width: calc(100vw - 32px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 6px 24px rgba(28, 31, 88, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), var(--shadow-float);
 }
-.bulk-acts { display: flex; gap: 4px; flex-wrap: wrap; }
-.bulk-bar .btn-quiet { padding: 8px 12px; }
+.bulk-acts { display: flex; gap: var(--s1); flex-wrap: wrap; }
+.bulk-bar .btn-quiet { padding: 8px var(--s3); }
 .bulk-del { color: var(--over-fg); }
 
-/* Category group header, a quiet band inside the rows list. */
-.group-head {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  padding: 12px 16px 8px;
-  font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
-  /* Darker than --ink-2: the tinted band drags --ink-2 to 4.35:1, under AA. */
-  color: #43466B;
-  background: rgba(28, 31, 88, 0.025);
-}
-.group-head .num { font-size: 12px; letter-spacing: 0; text-transform: none; }
-
-/* Auto-assign modes sheet: a stacked list of full-width, left-aligned choices. */
-.aa-modes { display: flex; flex-direction: column; gap: 8px; }
-.aa-modes .btn-quiet { display: block; width: 100%; text-align: left; }
-
-/* Manage-category row: name/amount/delete on the first line, the target kind and
-   its date wrap to a shared second line, the group to a full-width third. */
-.cat-edit { flex-wrap: wrap; }
-.cat-edit .cat-kind { flex: 1 1 45%; min-width: 0; }
-.cat-edit input.cat-due { flex: 1 1 45%; width: auto; min-width: 0; }
-.cat-edit input.cat-group { flex: 0 0 100%; }
-
-/* Bottom of the page, quiet, and nowhere near the header where the budget
-   switcher lives. Deleting a budget is not a thing to put a thumb's width from
-   switching to one. */
-.danger-zone { margin-top: 34px; text-align: center; }
-.btn-danger {
-  color: var(--over-fg);
-  font-size: 13px; font-weight: 600;
-  padding: 12px 18px; min-height: var(--tap);
-  border-radius: var(--r-ctl);
-  transition: transform var(--t-press) var(--ease-out),
-              background-color var(--t-press) ease;
-}
-
-.empty { padding: 34px 16px; text-align: center; color: var(--ink-2); font-size: 14px; }
-.empty-state { text-align: center; padding: 40px 20px; margin-top: 20px; }
-.empty-state p { margin: 8px auto 20px; max-width: 32ch; }
-
-/* ---------------------------------------------------------------- fab */
-
-.fab {
-  position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: calc(20px + env(safe-area-inset-bottom));
-  z-index: 10;
-  padding: 14px 30px;
-  /* Darker than --blurple and at higher alpha, on purpose. Tinting the brand
-     blurple at 0.86 let the cream bleed through and dropped white-on-fab to
-     3.89:1 -- under AA, on the primary action. The blur still reads at the
-     edges; the contrast is not negotiable. */
-  background: rgba(69, 75, 220, 0.90);
-  -webkit-backdrop-filter: blur(20px) saturate(170%);
-  backdrop-filter: blur(20px) saturate(170%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 6px 24px rgba(84, 91, 254, 0.34);
-}
-.fab:active { transform: translateX(-50%) scale(0.96); }
-
-/* ---------------------------------------------------------------- sheets */
-
-/* The sheets used to appear and vanish with no transition whatsoever, which
-   reads as the app glitching rather than as a panel opening. A sheet that slides
-   from the bottom edge also explains where it came from and where a dismiss
-   sends it back to -- the grabber above already promises that, so the motion has
-   to agree with it.
-   translateY(100%) rather than a pixel value: it's the sheet's own height, so it
-   parks exactly off-screen whatever ends up inside it.
-   display + overlay with allow-discrete are what let a [open]-toggled <dialog>
-   animate OUT at all; without them the close is instant. Unsupported browsers
-   just get today's behaviour -- appear, disappear -- so this degrades to par. */
+/* ---- sheet ------------------------------------------------------------------------------
+   KIT: every <dialog> is a bottom sheet on phone, centered modal in §5.
+   Slide-up + backdrop fade both ways; @starting-style + allow-discrete make
+   the close animate at all. Glass is allowed here (chrome), inputs inside sit
+   on their own solid fills.
+   MARKUP  <dialog id="x-dialog"><form class="sheet" method="dialog">
+             <div class="sheet-head"><h2>Title</h2></div> …fields…
+             <div class="sheet-actions"><button class="btn-quiet">Cancel</button>
+               <button class="btn">Save</button></div></form></dialog>
+   TOKENS  r-sheet, ease-drawer/out, t-sheet-in/out
+   OPUS: a new dialog = copy one of these wholesale; never restyle <dialog>. */
 dialog {
   border: none; padding: 0; background: none;
-  width: 100%; max-width: 640px;
+  width: 100%; max-width: var(--maxw);
   margin: auto auto 0;
   color: var(--ink);
-
-  /* Closed / exiting. Faster than the enter: the user has already decided, and
-     the system should get out of the way. */
   opacity: 0;
   transform: translateY(100%);
   transition:
-    opacity   220ms var(--ease-out),
-    transform 220ms var(--ease-out),
-    display   220ms allow-discrete,
-    overlay   220ms allow-discrete;
+    opacity   var(--t-sheet-out) var(--ease-out),
+    transform var(--t-sheet-out) var(--ease-out),
+    display   var(--t-sheet-out) allow-discrete,
+    overlay   var(--t-sheet-out) allow-discrete;
 }
 dialog[open] {
   opacity: 1;
   transform: translateY(0);
   transition:
-    opacity   340ms var(--ease-drawer),
-    transform 340ms var(--ease-drawer),
-    display   340ms allow-discrete,
-    overlay   340ms allow-discrete;
+    opacity   var(--t-sheet-in) var(--ease-drawer),
+    transform var(--t-sheet-in) var(--ease-drawer),
+    display   var(--t-sheet-in) allow-discrete,
+    overlay   var(--t-sheet-in) allow-discrete;
 }
 @starting-style {
   dialog[open] { opacity: 0; transform: translateY(100%); }
 }
-
 dialog::backdrop {
-  background: rgba(28, 31, 88, 0);
+  background: rgba(32, 40, 42, 0);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   transition:
-    background 220ms var(--ease-out),
-    display    220ms allow-discrete,
-    overlay    220ms allow-discrete;
+    background var(--t-sheet-out) var(--ease-out),
+    display    var(--t-sheet-out) allow-discrete,
+    overlay    var(--t-sheet-out) allow-discrete;
 }
 dialog[open]::backdrop {
-  background: rgba(28, 31, 88, 0.28);
+  background: rgba(32, 40, 42, 0.30);
   transition:
-    background 340ms var(--ease-drawer),
-    display    340ms allow-discrete,
-    overlay    340ms allow-discrete;
+    background var(--t-sheet-in) var(--ease-drawer),
+    display    var(--t-sheet-in) allow-discrete,
+    overlay    var(--t-sheet-in) allow-discrete;
 }
 @starting-style {
-  dialog[open]::backdrop { background: rgba(28, 31, 88, 0); }
+  dialog[open]::backdrop { background: rgba(32, 40, 42, 0); }
 }
-
 .sheet {
-  background: rgba(255, 255, 255, 0.86);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  backdrop-filter: blur(30px) saturate(180%);
-  border-radius: 22px 22px 0 0;
+  background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
+  border-radius: var(--r-sheet) var(--r-sheet) 0 0;
   padding: 14px 18px calc(22px + env(safe-area-inset-bottom));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 -8px 40px rgba(28, 31, 88, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 -8px 40px rgba(32, 40, 42, 0.12);
   max-height: 88vh;
   overflow-y: auto;
-  /* Scrolling to the end of a long category list shouldn't hand the scroll to
-     the page underneath and drag the whole app around behind the sheet. */
-  overscroll-behavior: contain;
+  overscroll-behavior: contain;   /* long lists don't drag the page behind */
 }
-
-/* iOS drag indicator. Pure CSS — no markup needed for something decorative. */
-.sheet::before {
+.sheet::before {   /* iOS grabber — decorative, so CSS not markup */
   content: '';
   display: block;
   width: 36px; height: 5px;
   border-radius: 3px;
-  background: rgba(28, 31, 88, 0.18);
+  background: rgba(32, 40, 42, 0.18);
   margin: 0 auto 14px;
 }
-
-.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.sheet-actions { display: flex; gap: 10px; margin-top: 20px; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s4); }
+.sheet-actions { display: flex; gap: 10px; margin-top: var(--s5); }
 .sheet-actions .btn, .sheet-actions .btn-quiet { flex: 1; }
 
-/* On a wide screen this stops being a bottom sheet and becomes a centred modal,
-   so the motion has to change with it: a centred dialog isn't anchored to the
-   bottom edge and sliding up from off-screen would be a lie about where it came
-   from. It scales from its own centre instead. Never from scale(0) -- nothing
-   real appears out of literally nothing. */
-@media (min-width: 641px) {
+/* ---- empty state ---------------------------------------------------------------------------
+   KIT: .empty (inside a .rows list) and .empty-state (a whole stub screen).
+   Stub screens name what will live there so the tab is a promise, not a hole. */
+.empty { padding: var(--s8) var(--s4); text-align: center; color: var(--ink-2); font-size: 14px; }
+.empty-state { text-align: center; padding: 48px var(--s5); }
+.empty-state h2 { font-family: var(--font-display); font-size: 22px; }
+.empty-state p { margin: var(--s2) auto var(--s5); max-width: 34ch; color: var(--ink-2); font-size: 14px; }
+.empty-badge {
+  display: inline-grid; place-items: center;
+  width: 56px; height: 56px; border-radius: var(--r-pill);
+  background: var(--brand-tint); color: var(--brand);
+  margin-bottom: var(--s3);
+}
+.empty-badge svg { width: 26px; height: 26px; }
+
+/* ---- inspector ------------------------------------------------------------------------------
+   KIT: the month summary card (Assigned/Spent + Cost to Be Me). Phone: a card
+   above the category table. §5: docks right as the Inspector rail.
+   OPUS: per-category detail (targets, cover-overspending, activity) attaches
+   INSIDE #summary's parent <aside> as more .card blocks. */
+.summary-line {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
+  font-size: var(--fs-meta); color: var(--ink-2);
+}
+.summary-line + .summary-line { margin-top: var(--s2); }
+.summary-line .num { color: var(--ink); font-weight: 700; }
+.ctbm { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--hairline); display: flex; flex-direction: column; gap: var(--s2); }
+.ctbm-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.ctbm-row input { width: 120px; flex: none; text-align: right; }
+.ctbm-verdict { font-weight: 800; }
+.ctbm-verdict.ok    { color: var(--ok-fg); }
+.ctbm-verdict.short { color: var(--under-fg); }
+
+/* ---- banner (recurring due) -------------------------------------------------------------------
+   KIT: quiet prompt card with one action. */
+.banner {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  background: var(--surface);
+  border-radius: var(--r-card);
+  border: 1px solid var(--hairline);
+  box-shadow: none;
+  padding: 14px 14px 14px var(--s4);
+  margin-bottom: var(--s3);
+}
+.banner .btn { padding: 10px var(--s4); font-size: 14px; white-space: nowrap; }
+
+/* ---- dialog internals (manage lists) ------------------------------------------------------------
+   Rows inside the Categories / Recurring / Moves sheets. */
+.cat-edit { display: flex; align-items: center; gap: var(--s2); padding: var(--s2) 0; flex-wrap: wrap; }
+.cat-edit input[type=text] { flex: 1; min-width: 0; }
+.cat-edit input[type=number] { width: 92px; flex: none; }
+.cat-edit .cat-kind { flex: 1 1 45%; min-width: 0; }
+.cat-edit input.cat-due { flex: 1 1 45%; width: auto; min-width: 0; }
+.cat-edit input.cat-group { flex: 0 0 100%; }
+.cat-edit + .cat-edit { border-top: 1px solid var(--hairline); }
+.rec-edit { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+.rec-edit + .rec-edit { border-top: 1px solid var(--hairline); }
+.rec-edit .body { flex: 1; min-width: 0; }
+.rec-edit .desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.rec-auto { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14px; }
+.rec-auto input { width: 20px; height: 20px; flex: none; accent-color: var(--brand); }
+.move-up   { color: var(--ok-fg); }
+.move-down { color: var(--under-fg); }
+.aa-modes { display: flex; flex-direction: column; gap: var(--s2); }
+.aa-modes .btn-quiet { display: block; width: 100%; text-align: left; }
+.danger-zone { margin-top: var(--s8); text-align: center; }
+
+/* ================================ §4 SCREENS ============================== */
+
+/* Per-tab chrome: only Budget shows the RTA banner; only Budget + Accounts
+   show the month stepper. Stubs keep the switcher row. */
+body:not([data-tab="budget"]) .rta-banner { display: none; }
+body:not([data-tab="budget"]):not([data-tab="accounts"]) .appbar-month { display: none; }
+
+/* Budget screen: phone order is summary → categories (flex order), so the
+   month story reads before the table. §5 re-lays this grid with the summary
+   docked right as the Inspector. */
+.budget-grid { display: flex; flex-direction: column; gap: var(--s4); }
+.budget-grid .inspector { order: -1; display: flex; flex-direction: column; gap: var(--s3); }
+
+/* Desktop-only column header row over the category table. */
+.cat-cols { display: none; }
+
+/* Accounts screen spacing. */
+.acct-total { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); padding: var(--s2) var(--s4) 0; }
+
+/* ================================ §5 WIDE ================================= */
+
+/* ≥768px: the SAME five-tab nav becomes a fixed left sidebar; content shifts
+   right; the Budget screen becomes table + Inspector rail. No second DOM. */
+@media (min-width: 768px) {
+  .tabbar {
+    top: 0; right: auto; bottom: 0;
+    width: var(--sidebar-w);
+    grid-template-columns: 1fr;
+    grid-auto-rows: min-content;
+    align-content: start;
+    padding: calc(env(safe-area-inset-top) + 76px) var(--s3) var(--s3);
+    height: auto;
+    box-shadow: 1px 0 0 var(--hairline);
+  }
+  .tab {
+    flex-direction: row; justify-content: flex-start; gap: var(--s3);
+    padding: 0 var(--s3);
+    border-radius: var(--r-ctl);
+    font-size: 15px;
+  }
+  .tab[aria-current="page"] { background: var(--brand-tint); }
+  .appbar, main { margin-left: var(--sidebar-w); }
+  .screen { max-width: 960px; padding-bottom: 96px; }
+  .appbar { padding-left: var(--s6); padding-right: var(--s6); }
+  .appbar-top select { flex: none; }
+
+  /* Budget: category table left, Inspector rail right. */
+  .budget-grid { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector-w); gap: var(--s4); align-items: start; }
+  /* ponytail: not sticky — the tall sticky appbar would eat it. Revisit only
+     if the Inspector grows a category-detail panel worth pinning. */
+  .budget-grid .inspector { order: 0; }
+  .budget-grid .budget-main { min-width: 0; }
+
+  /* cat-row unfolds into four aligned columns; phone labels hide, the shared
+     .cat-cols header row shows instead. Available column width fits
+     "Needs $1,234.56" without wrapping. */
+  .cat-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 120px 120px 148px;
+    column-gap: var(--s3);
+    padding: var(--s2) var(--s4);
+    font-size: var(--fs-micro); font-weight: 800;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .cat-cols span:not(:first-child) { text-align: right; }
+  .cat-row {
+    grid-template-columns: minmax(0, 1fr) 120px 120px 148px;
+    grid-template-areas: "name assigned activity avail" "foot foot foot foot";
+  }
+  .cat-meta { display: contents; }   /* children join the 4-column grid */
+  .cat-assigned { grid-area: assigned; justify-content: flex-end; }
+  .cat-activity { grid-area: activity; justify-self: end; }
+  .cat-activity .num { font-size: var(--fs-body); color: var(--ink); }
+  .cell-lbl { display: none; }
+  .group-head { padding-right: var(--s4); }
+
+  /* FAB keeps clear of nothing on desktop — no tab bar below it. */
+  .fab { bottom: var(--s6); }
+  .bulk-bar { left: calc(50% + var(--sidebar-w) / 2); bottom: var(--s6); }
+
+  /* Dialogs: centered modal, scale-in from its own centre (a centered panel
+     sliding from the bottom edge would lie about where it came from). */
   dialog {
     margin: auto;
     transform: scale(0.96);
@@ -578,40 +865,38 @@ dialog[open]::backdrop {
   @starting-style {
     dialog[open] { opacity: 0; transform: scale(0.96); }
   }
-  .sheet { border-radius: 22px; }
+  .sheet { border-radius: var(--r-sheet); }
 }
 
-.cat-edit { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
-.cat-edit input[type=text] { flex: 1; min-width: 0; }
-.cat-edit input[type=number] { width: 92px; flex: none; }
-.cat-edit + .cat-edit { border-top: 1px solid var(--line); }
+/* =============================== §6 PREFS ================================ */
 
-.rec-edit { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
-.rec-edit + .rec-edit { border-top: 1px solid var(--line); }
-.rec-edit .body { flex: 1; min-width: 0; }
-.rec-edit .desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-
-.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
-
-[hidden] { display: none !important; }
-
-/* ---------------------------------------------------------------- login */
-
-.login { min-height: 100svh; display: grid; place-content: center; text-align: center; gap: 6px; padding: 24px; }
+/* login (pre-auth, outside the shell) */
+.login { min-height: 100svh; display: grid; place-content: center; text-align: center; gap: 6px; padding: var(--s6); }
+.login h1 { font-size: 40px; }
 .login p { color: var(--ink-2); margin-bottom: 22px; max-width: 34ch; }
 
-/* Reduce Motion asks for less movement, not for nothing. Killing every
-   transition (what this used to do) throws away the fades and colour changes
-   that explain what just happened, and a sheet that teleports in is exactly the
-   jarring change the setting exists to prevent. So: all motion through space
-   goes, opacity and colour stay. */
+/* Reduce Transparency: fall back to opaque chrome. People who set this are
+   not asking politely. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .fab, .sheet, dialog::backdrop {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .glass { background: var(--paper) !important; }
+  .sheet { background: var(--surface) !important; }
+  .fab { background: var(--brand) !important; }
+}
+
+/* Reduce Motion asks for less movement, not nothing: motion through space
+   goes, opacity/color feedback stays. */
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; }
-  .btn:active, .btn-quiet:active, .icon-btn:active,
-  .btn-danger:active, .del:active, .month button:active { transform: none !important; }
-  .fab:active { transform: translateX(-50%) !important; }
+  .btn:active, .btn-quiet:active, .icon-btn:active, .btn-danger:active,
+  .row-del:active, .month-btn:active, .tab:active, .fab:active { transform: none !important; }
+  .bulk-bar { transform: translateX(-50%) !important; }
   dialog, dialog[open] { transform: none !important; }
   @starting-style {
     dialog[open] { transform: none !important; }
   }
+  .group-chev { transition: none !important; }
 }

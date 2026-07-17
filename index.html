@@ -6,14 +6,17 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Budget">
-<meta name="theme-color" content="#FEF9ED">
+<meta name="theme-color" content="#F5F2EA">
 <title>Budget</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<!-- OPUS: design decisions live in styles.css §1 TOKENS; component patterns in
+     §3 KIT (each has a doc comment). This file is the shell: five screens, one
+     visible at a time. app.js toggles them. Copy patterns, don't invent. -->
 </head>
-<body>
+<body data-tab="budget">
 
 <div class="login" id="login" hidden>
   <h1>Budget</h1>
@@ -22,59 +25,157 @@
   <p class="small" id="login-err" style="color:var(--over-fg)" hidden></p>
 </div>
 
-<div class="wrap" id="app" hidden>
-  <header>
-    <select id="budget-switch" aria-label="Budget"></select>
-    <button class="btn-quiet icon-btn" id="rename-budget" aria-label="Rename budget" title="Rename budget" hidden>&#9998;</button>
-    <button class="btn-quiet icon-btn" id="new-budget" aria-label="New budget" title="New budget">+</button>
-    <button class="btn-quiet icon-btn" id="hide-amounts" aria-label="Hide amounts" aria-pressed="false" title="Hide amounts">&#128065;</button>
-    <button class="btn-quiet" id="signout">Sign out</button>
+<div id="app" hidden>
+
+  <!-- ============ appbar (kit: .appbar) — sticky glass chrome ============ -->
+  <header class="appbar glass">
+    <div class="appbar-top">
+      <select id="budget-switch" aria-label="Budget"></select>
+      <button class="btn-quiet icon-btn" id="rename-budget" aria-label="Rename budget" title="Rename budget" hidden>&#9998;</button>
+      <button class="btn-quiet icon-btn" id="new-budget" aria-label="New budget" title="New budget">+</button>
+      <button class="btn-quiet icon-btn" id="hide-amounts" aria-label="Hide amounts" aria-pressed="false" title="Hide amounts">&#128065;</button>
+      <button class="btn-quiet" id="signout">Sign out</button>
+    </div>
+    <div class="appbar-month">
+      <button class="month-btn" id="prev" aria-label="Previous month">&lsaquo;</button>
+      <h1 id="month-label"></h1>
+      <button class="month-btn" id="next" aria-label="Next month">&rsaquo;</button>
+    </div>
+    <!-- rta-banner (kit): render() fills it; solid state tint, never glass
+         under the number. Shown on the Budget tab only (styles §4). -->
+    <div id="rta-banner"></div>
   </header>
 
-  <div class="card empty-state" id="no-budget" hidden>
-    <h2>No budget yet</h2>
-    <p class="small muted">Create one to start tracking. Make a personal one, a shared one, or both.</p>
-    <button class="btn" id="first-budget">Create a budget</button>
+  <div class="screen" id="no-budget" hidden>
+    <div class="card empty-state">
+      <h2>No budget yet</h2>
+      <p>Create one to start tracking. Make a personal one, a shared one, or both.</p>
+      <button class="btn" id="first-budget">Create a budget</button>
+    </div>
   </div>
 
-  <div id="budget-view">
-    <div class="month">
-      <button id="prev" aria-label="Previous month">&lsaquo;</button>
-      <h2 id="month-label"></h2>
-      <button id="next" aria-label="Next month">&rsaquo;</button>
-    </div>
+  <main id="budget-view">
 
-    <div class="card" id="summary"></div>
-
-    <div class="card banner" id="rec-banner" hidden>
-      <span class="small" id="rec-banner-text"></span>
-      <button class="btn" id="apply-rec">Add them</button>
-    </div>
-
-    <div class="section-head">
-      <h2>Categories <span class="small muted" id="cat-count"></span></h2>
-      <button class="btn-quiet" id="manage-cats">Manage</button>
-    </div>
-    <div class="rows" id="categories"></div>
-
-    <div class="section-head">
-      <h2>Transactions <span class="small muted" id="txn-count"></span></h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-        <button class="btn-quiet" id="sel-toggle">Select</button>
-        <button class="btn-quiet" id="export-csv">Export</button>
-        <button class="btn-quiet" id="manage-moves">Moves</button>
-        <button class="btn-quiet" id="manage-rec">Recurring</button>
+    <!-- ================= SCREEN 1 · BUDGET (the Plan) ==================== -->
+    <section class="screen" id="screen-budget" data-screen="budget">
+      <div class="banner" id="rec-banner" hidden>
+        <span class="small" id="rec-banner-text"></span>
+        <button class="btn" id="apply-rec">Add them</button>
       </div>
-    </div>
-    <div class="rows" id="transactions"></div>
 
-    <div class="danger-zone">
-      <button class="btn-danger" id="del-budget">Delete this budget</button>
-    </div>
-  </div>
+      <div class="budget-grid">
+        <div class="budget-main">
+          <div class="section-head">
+            <h2>Categories <span class="small muted" id="cat-count"></span></h2>
+            <button class="btn-quiet" id="manage-cats">Manage</button>
+          </div>
+          <div class="rows">
+            <div class="cat-cols" aria-hidden="true">
+              <span>Category</span><span>Assigned</span><span>Activity</span><span>Available</span>
+            </div>
+            <div id="categories"></div>
+          </div>
+        </div>
+
+        <!-- inspector (kit): month summary + Cost to Be Me. Docks right ≥768px.
+             OPUS: per-category detail (target editor, cover-overspending,
+             category activity) attaches inside this aside as more .card
+             blocks when that feature is built. -->
+        <aside class="inspector">
+          <div class="card" id="summary"></div>
+        </aside>
+      </div>
+
+      <div class="danger-zone">
+        <button class="btn-danger" id="del-budget">Delete this budget</button>
+      </div>
+    </section>
+
+    <!-- ============ SCREEN 2 · ACCOUNTS + TRANSACTIONS =================== -->
+    <section class="screen" id="screen-accounts" data-screen="accounts" hidden>
+      <div class="section-head">
+        <h2>Accounts</h2>
+      </div>
+      <!-- acct rows (kit: .acct-row): render() fills. Today an "account" is a
+           budget pot (single-pot model). OPUS: Phase E real accounts replace
+           the pot rows here — same .acct-row markup, one per account row from
+           the accounts table, cleared/working balances in .acct-meta. -->
+      <div class="rows" id="accounts"></div>
+
+      <div class="section-head">
+        <h2>Transactions <span class="small muted" id="txn-count"></span></h2>
+        <div class="toolbar">
+          <button class="btn-quiet" id="sel-toggle">Select</button>
+          <button class="btn-quiet" id="export-csv">Export</button>
+          <button class="btn-quiet" id="manage-moves">Moves</button>
+          <button class="btn-quiet" id="manage-rec">Recurring</button>
+        </div>
+      </div>
+      <!-- register (kit: .txn-row). OPUS: Phase E adds account / cleared
+           columns to these rows — extend the .txn-meta line, don't add cells. -->
+      <div class="rows" id="transactions"></div>
+    </section>
+
+    <!-- ================= STUB SCREENS (labeled, not built) ================
+         OPUS: to build one, copy the structure of #screen-accounts above into
+         the stub, keep the section id and data-screen, render into containers
+         from app.js render(). Add the data path in loadMonth() only if the
+         screen needs data the app doesn't already hold. -->
+    <section class="screen" id="screen-home" data-screen="home" hidden>
+      <div class="card empty-state">
+        <span class="empty-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></span>
+        <h2>Home</h2>
+        <p>Alerts, pinned categories and the month summary land here later. The Budget tab is the working surface for now.</p>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-reflect" data-screen="reflect" hidden>
+      <div class="card empty-state">
+        <span class="empty-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 20V10"/><path d="M12 20V4"/><path d="M19 20v-6"/></svg></span>
+        <h2>Reflect</h2>
+        <p>Spending breakdown, income vs expense and age of money arrive with Phase D reports.</p>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-settings" data-screen="settings" hidden>
+      <div class="card empty-state">
+        <span class="empty-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9"/><circle cx="17" cy="7" r="2.5"/><path d="M20 17h-9"/><circle cx="7" cy="17" r="2.5"/></svg></span>
+        <h2>Settings</h2>
+        <p>Preferences move in here eventually. Rename, hide amounts and sign out live in the top bar for now.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ tabbar (kit: .tabbar) — five tabs, one shell ============
+       OPUS: a new tab = one .tab button here (24px stroke icon + label), one
+       <section class="screen"> above, one entry in SCREENS in app.js. -->
+  <nav class="tabbar glass" aria-label="Main">
+    <button class="tab" data-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="tab" data-tab="budget" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7.5 9 5.5 9-5.5"/></svg>
+      <span>Budget</span>
+    </button>
+    <button class="tab" data-tab="accounts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-6 9 6"/><path d="M5 9v9M9.7 9v9M14.3 9v9M19 9v9"/><path d="M3 20h18"/></svg>
+      <span>Accounts</span>
+    </button>
+    <button class="tab" data-tab="reflect">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 20V10"/><path d="M12 20V4"/><path d="M19 20v-6"/></svg>
+      <span>Reflect</span>
+    </button>
+    <button class="tab" data-tab="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9"/><circle cx="17" cy="7" r="2.5"/><path d="M20 17h-9"/><circle cx="7" cy="17" r="2.5"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+
 </div>
 
-<button class="btn fab" id="add-btn" hidden>Add transaction</button>
+<button class="fab" id="add-btn" hidden>&#65291; Add</button>
 
 <div class="bulk-bar glass" id="bulk-bar" hidden>
   <span class="num" id="bulk-count">0 selected</span>
@@ -85,6 +186,10 @@
     <button class="btn-quiet" data-bulk="cancel">Cancel</button>
   </div>
 </div>
+
+<!-- ================== sheets (kit: dialog > .sheet) =======================
+     OPUS: a new dialog = copy #txn-dialog wholesale (dialog > form.sheet >
+     .sheet-head + .field blocks + .sheet-actions). Never restyle <dialog>. -->
 
 <dialog id="txn-dialog">
   <form class="sheet" method="dialog" id="txn-form">
@@ -128,7 +233,7 @@
     </div>
     <p class="small" id="txn-err" style="color:var(--over-fg);margin-top:12px" hidden></p>
     <div class="sheet-actions">
-      <button type="button" class="btn-quiet" id="txn-cancel" style="flex:1">Cancel</button>
+      <button type="button" class="btn-quiet" id="txn-cancel">Cancel</button>
       <button type="submit" class="btn">Save</button>
     </div>
   </form>
@@ -144,7 +249,7 @@
       <input type="text" id="c-group" class="cat-group" placeholder="Group (optional)" maxlength="40" list="group-list" autocomplete="off" aria-label="Category group">
     </form>
     <div id="cat-list"></div>
-    <p class="small muted" style="margin-top:14px">A target is a goal, not an assignment — it colours a category amber until it's funded and drives Auto-assign. <b>Monthly refill</b> tops it up each month; <b>By date</b> saves the amount by a date, split evenly over the months left.</p>
+    <p class="small muted" style="margin-top:14px">A target is a goal, not an assignment — it marks a category underfunded until it's funded and drives Auto-assign. <b>Monthly refill</b> tops it up each month; <b>By date</b> saves the amount by a date, split evenly over the months left.</p>
     <div class="sheet-actions">
       <button type="button" class="btn" id="cat-done">Done</button>
     </div>
@@ -233,7 +338,7 @@
       <button class="btn-quiet" data-aa="reset">Clear all to zero</button>
     </div>
     <div class="sheet-actions">
-      <button type="button" class="btn-quiet" data-aa="cancel" style="flex:1">Cancel</button>
+      <button type="button" class="btn-quiet" data-aa="cancel">Cancel</button>
     </div>
   </div>
 </dialog>
@@ -269,7 +374,7 @@
       </select>
     </div>
     <div class="sheet-actions">
-      <button type="button" class="btn-quiet" id="bulk-cancel" style="flex:1">Cancel</button>
+      <button type="button" class="btn-quiet" id="bulk-cancel">Cancel</button>
       <button type="button" class="btn" id="bulk-apply">Apply</button>
     </div>
   </div>
