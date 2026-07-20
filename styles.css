@@ -980,6 +980,58 @@ dialog[open]::backdrop {
 .aom-body .muted-strong { color: var(--ink); font-weight: 800; }
 .aom-body p { margin-top: var(--s1); }
 
+/* ---- home dashboard (Phase 2) -----------------------------------------------
+   KIT: the Home tab card stack. Cards reuse .card / .summary-line / .txn-amt;
+   only the stack layout, the alert pills and the two list-row shapes are new.
+   Order and visibility come from localStorage, so any card can be anywhere. */
+.home-cards { display: flex; flex-direction: column; gap: var(--s3); }
+
+/* Alert pills: state-tinted, full-width, tappable. Same fills as the RTA strip. */
+.home-alerts { display: flex; flex-direction: column; gap: var(--s2); }
+.home-alert {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  width: 100%; text-align: left; min-height: var(--tap);
+  padding: var(--s3) var(--s4); border-radius: var(--r-card);
+  font-size: var(--fs-body); font-weight: 700; box-shadow: var(--shadow-card);
+  transition: transform var(--t-press) var(--ease-out);
+}
+.home-alert:active { transform: scale(0.98); }
+.home-alert.a-ok   { background: var(--rta-ok-bg);   color: var(--ok-fg); }
+.home-alert.a-over { background: var(--rta-over-bg); color: var(--over-fg); }
+.home-alert b { font-weight: 800; white-space: nowrap; }
+
+/* Plan card: the RTA hero number, echoing the Budget strip, tap-through to plan. */
+.home-plan { display: flex; flex-direction: column; gap: var(--s1); width: 100%; text-align: left; }
+.home-plan .rta-amt { font-family: var(--font-display); font-size: var(--fs-rta); font-weight: 800; line-height: 1.05; }
+.home-rta-ok   { color: var(--ok-fg); }
+.home-rta-over { color: var(--over-fg); }
+.home-rta-zero { color: var(--ink); }
+
+/* Spending delta: red when you spent MORE than last month, green when less. */
+.home-delta { margin-top: var(--s2); font-size: var(--fs-meta); font-weight: 700; color: var(--ink-2); }
+.home-delta.up   { color: var(--over-fg); }
+.home-delta.down { color: var(--ok-fg); }
+
+/* List cards (upcoming, recent): a header over hairline-split tappable rows. */
+.home-head { font-weight: 800; font-size: var(--fs-section); color: var(--ink); margin-bottom: var(--s2); }
+.home-row {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0 var(--s3);
+  width: 100%; text-align: left; padding: var(--s2) 0; min-height: var(--tap);
+}
+.home-row + .home-row { border-top: 1px solid var(--hairline); }
+.home-row-main { grid-column: 1; grid-row: 1; font-size: var(--fs-body); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-row-sub  { grid-column: 1; grid-row: 2; font-size: var(--fs-meta); color: var(--ink-2); }
+.home-row .txn-amt { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+
+/* Customize sheet: a hide-toggle + up/down list (no drag-and-drop). */
+.cust-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2) 0; min-height: var(--tap); }
+.cust-row + .cust-row { border-top: 1px solid var(--hairline); }
+.cust-name { display: flex; align-items: center; gap: var(--s2); margin: 0; font-size: var(--fs-body); font-weight: 600; color: var(--ink); }
+.cust-name input { width: 20px; height: 20px; flex: none; accent-color: var(--brand); }
+.cust-move { display: flex; gap: var(--s2); flex: none; }
+.cust-move .btn-quiet { min-width: var(--tap); min-height: var(--tap); padding: 0; }
+.cust-move .btn-quiet:disabled { opacity: 0.35; }
+
 /* ================================ §4 SCREENS ============================== */
 
 /* Per-tab chrome: only Budget shows the RTA banner; only Budget + Accounts

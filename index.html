@@ -148,12 +148,16 @@
          the stub, keep the section id and data-screen, render into containers
          from app.js render(). Add the data path in loadMonth() only if the
          screen needs data the app doesn't already hold. -->
+    <!-- Home dashboard (Phase 2). A configurable card stack: render() fills
+         #home-cards in the order/visibility from localStorage (budget.home),
+         Customize opens #home-cust to hide/reorder. Each card reads roll/state
+         like the Budget screen — no extra fetch. -->
     <section class="screen" id="screen-home" data-screen="home" hidden>
-      <div class="card empty-state">
-        <span class="empty-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></span>
+      <div class="section-head">
         <h2>Home</h2>
-        <p>Alerts, pinned categories and the month summary land here later. The Budget tab is the working surface for now.</p>
+        <button class="btn-quiet" id="home-customize">Customize</button>
       </div>
+      <div class="home-cards" id="home-cards"></div>
     </section>
 
     <section class="screen" id="screen-reflect" data-screen="reflect" hidden>
@@ -449,6 +453,19 @@
     <div id="moves-list"></div>
     <div class="sheet-actions">
       <button type="button" class="btn" id="moves-done">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Home Customize (Phase 2). ponytail: a hide-toggle + up/down list, not a
+     drag-and-drop grid builder. Writes budget.home in localStorage. -->
+<dialog id="home-cust">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Customize Home</h2></div>
+    <p class="small muted" style="margin-bottom:12px">Show, hide and reorder the cards on your Home tab. Saved on this device.</p>
+    <div id="home-cust-list"></div>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="home-cust-done">Done</button>
     </div>
   </div>
 </dialog>

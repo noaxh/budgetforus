@@ -108,6 +108,20 @@ async function maybeAutoApply() {
 
 const fail = e => { console.error(e); alert(e.message ?? String(e)) }
 
+// ---- Home dashboard config (Phase 2). Which cards show and in what order, per
+// device in localStorage. ponytail: a plain array merged with the default, so a
+// newly-added card shows up for existing users instead of silently vanishing.
+const HOME_CARD_LABELS = { alerts: 'Alerts', plan: 'Plan state', spending: 'Spending summary', upcoming: 'Upcoming bills', recent: 'Recent transactions' }
+const HOME_DEFAULT = Object.keys(HOME_CARD_LABELS)
+const HOME_KEY = 'budget.home'
+function homeConfig() {
+  let cfg = []
+  try { const c = JSON.parse(localStorage.getItem(HOME_KEY)); if (Array.isArray(c)) cfg = c.filter(x => x && HOME_CARD_LABELS[x.id]) } catch {}
+  for (const id of HOME_DEFAULT) if (!cfg.some(c => c.id === id)) cfg.push({ id, hidden: false })
+  return cfg
+}
+const saveHomeConfig = cfg => localStorage.setItem(HOME_KEY, JSON.stringify(cfg))
+
 // ---------------------------------------------------------------- render
 
 const sumKind = k => state.txns.filter(t => t.kind === k).reduce((s, t) => s + cents(t.amount), 0)
@@ -483,6 +497,68 @@ function render() {
         <p class="small muted">How long your money typically sits before you spend it. Higher means you're spending income from further back, not paycheque to paycheque.</p>
       </div>
     </div>`
+
+  // --- home (Phase 2 dashboard). A configurable card stack over data already in
+  // hand: roll (plan state), totalSpent vs last month (spending), pendingRecurring
+  // (upcoming), state.txns (recent). Each card is a function; homeConfig() decides
+  // order and visibility. Cards that would be empty (no alerts, no bills) return ''
+  // and are dropped, so the stack never shows a hollow card.
+  const overspent = state.cats.filter(c => roll.cats.get(c.id)?.status === 'over').length
+  const prevMs = prevMonthStart(monthStart(state.month))
+  const prevEndS = monthEnd(new Date(prevMs + 'T00:00'))
+  const lastSpent = state.history
+    .filter(t => t.kind === 'expense' && !t.parent_id && t.occurred_on >= prevMs && t.occurred_on <= prevEndS)
+    .reduce((s, t) => s + cents(t.amount), 0)
+  // Recurring occurrences due within the next 7 days (local dates, not UTC, to
+  // avoid an off-by-one near midnight). pendingRecurring already drops the added.
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const t0 = iso(new Date()), t7 = iso(new Date(Date.now() + 7 * 864e5))
+  const upcoming = pendingRecurring().filter(p => p.date >= t0 && p.date <= t7).sort((a, b) => a.date < b.date ? -1 : 1)
+  const recent = state.txns.filter(t => !t.parent_id).sort((a, b) => a.occurred_on < b.occurred_on ? 1 : -1).slice(0, 5)
+
+  // rtaK (over/ok/zero) is already computed above for the RTA banner; reuse it.
+  const homeCards = {
+    alerts: () => {
+      const a = []
+      if (roll.rta > 0) a.push(`<button class="home-alert a-ok" data-goto="budget"><span>Money to assign</span><b class="num">${money(roll.rta)}</b></button>`)
+      else if (roll.rta < 0) a.push(`<button class="home-alert a-over" data-goto="budget"><span>Assigned more than you have</span><b class="num">${money(roll.rta)}</b></button>`)
+      if (overspent) a.push(`<button class="home-alert a-over" data-goto="budget" data-view="over"><span>Overspending to cover</span><b>${overspent} categor${overspent === 1 ? 'y' : 'ies'} &rsaquo;</b></button>`)
+      return a.length ? `<div class="home-alerts">${a.join('')}</div>` : ''
+    },
+    plan: () => `<button class="card home-plan" data-goto="budget">
+      <span class="small muted">Ready to Assign</span>
+      <b class="num rta-amt home-rta-${rtaK}">${money(roll.rta)}</b>
+      <span class="small muted">${overspent ? `${overspent} overspent` : 'Nothing overspent'} &middot; ${state.cats.length} categor${state.cats.length === 1 ? 'y' : 'ies'}</span>
+    </button>`,
+    spending: () => {
+      const d = totalSpent - lastSpent
+      return `<div class="card">
+        <div class="summary-line"><span>Spent this month</span><span class="num">${money(totalSpent)}</span></div>
+        <div class="summary-line"><span>Spent last month</span><span class="num muted">${money(lastSpent)}</span></div>
+        <div class="home-delta ${d > 0 ? 'up' : d < 0 ? 'down' : ''} num">${d === 0 ? 'Same as last month' : `${money(Math.abs(d))} ${d > 0 ? 'more' : 'less'} than last month`}</div>
+      </div>`
+    },
+    upcoming: () => upcoming.length ? `<div class="card">
+      <div class="home-head">Next 7 days</div>
+      ${upcoming.map(({ rule: r, date }) => `<button class="home-row" data-goto="accounts">
+        <span class="home-row-main">${esc(r.description) || '<span class="muted">Recurring</span>'}</span>
+        <span class="home-row-sub">${date}</span>
+        <span class="txn-amt num${r.kind === 'income' ? ' txn-in' : ''}">${r.kind === 'income' ? '+' : '&minus;'}${money(cents(r.amount))}</span>
+      </button>`).join('')}
+    </div>` : '',
+    recent: () => recent.length ? `<div class="card">
+      <div class="home-head">Recent</div>
+      ${recent.map(t => `<button class="home-row" data-goto="accounts">
+        <span class="home-row-main">${esc(t.description) || '<span class="muted">No description</span>'}</span>
+        <span class="home-row-sub">${t.occurred_on} &middot; ${parentIds.has(t.id) ? 'Split' : esc(catName(t.category_id))}</span>
+        <span class="txn-amt num${t.kind === 'income' ? ' txn-in' : ''}">${t.kind === 'income' ? '+' : '&minus;'}${money(cents(t.amount))}</span>
+      </button>`).join('')}
+    </div>` : ''
+  }
+  const homeHtml = homeConfig().filter(c => homeCards[c.id] && !c.hidden).map(c => homeCards[c.id]()).filter(Boolean)
+  $('home-cards').innerHTML = homeHtml.length
+    ? homeHtml.join('')
+    : '<div class="empty">Nothing to show yet. Log a transaction, or open the Budget tab.</div>'
 }
 
 async function refresh() {
@@ -554,6 +630,47 @@ document.querySelector('.tabbar').onclick = e => {
   if (b) switchTab(b.dataset.tab)
 }
 window.addEventListener('hashchange', () => switchTab(location.hash.slice(1)))
+
+// ---- home dashboard: card taps and the Customize sheet.
+// A card tap routes to its screen; an alert may also set a focused view first so
+// the Budget screen opens already filtered (e.g. "overspending" -> over view).
+$('home-cards').onclick = e => {
+  const b = e.target.closest('[data-goto]')
+  if (!b) return
+  if (b.dataset.view) { state.view = b.dataset.view; localStorage.setItem('budget.view', state.view); render() }
+  switchTab(b.dataset.goto)
+}
+function renderHomeCust() {
+  const cfg = homeConfig()
+  $('home-cust-list').innerHTML = cfg.map((c, i) => `
+    <div class="cust-row">
+      <label class="cust-name"><input type="checkbox" data-hide="${c.id}"${c.hidden ? '' : ' checked'}> ${HOME_CARD_LABELS[c.id]}</label>
+      <span class="cust-move">
+        <button class="btn-quiet" data-up="${c.id}"${i === 0 ? ' disabled' : ''} aria-label="Move ${HOME_CARD_LABELS[c.id]} up">&uarr;</button>
+        <button class="btn-quiet" data-down="${c.id}"${i === cfg.length - 1 ? ' disabled' : ''} aria-label="Move ${HOME_CARD_LABELS[c.id]} down">&darr;</button>
+      </span>
+    </div>`).join('')
+}
+$('home-customize').onclick = () => { renderHomeCust(); $('home-cust').showModal() }
+$('home-cust-done').onclick = () => $('home-cust').close()
+$('home-cust').onclick = e => { if (e.target === $('home-cust')) $('home-cust').close() }  // backdrop tap
+$('home-cust-list').onclick = e => {
+  const up = e.target.closest('[data-up]'), down = e.target.closest('[data-down]')
+  if (!up && !down) return
+  const cfg = homeConfig()
+  const id = (up || down).dataset[up ? 'up' : 'down']
+  const i = cfg.findIndex(c => c.id === id), j = i + (up ? -1 : 1)
+  if (j < 0 || j >= cfg.length) return
+  ;[cfg[i], cfg[j]] = [cfg[j], cfg[i]]
+  saveHomeConfig(cfg); renderHomeCust(); render()
+}
+$('home-cust-list').onchange = e => {
+  const cb = e.target.closest('[data-hide]')
+  if (!cb) return
+  const cfg = homeConfig(), c = cfg.find(x => x.id === cb.dataset.hide)
+  if (c) c.hidden = !cb.checked
+  saveHomeConfig(cfg); render()
+}
 switchTab(location.hash.slice(1) || 'budget')
 
 // Collapse memory for category groups: <details> does the collapsing, this
