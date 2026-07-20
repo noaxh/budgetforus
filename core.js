@@ -85,10 +85,11 @@ export const sumSpentInRange = (history, id, from, to) =>
 // trends' report (Phase D item 2), which is this same function over a wider slice.
 export function spendingBreakdown(txns, cats) {
   const name = new Map(cats.map(c => [c.id, c.name]))
+  const parents = splitParentIds(txns)
   const byCat = new Map()
   let total = 0
   for (const t of txns) {
-    if (t.kind !== 'expense') continue
+    if (t.kind !== 'expense' || parents.has(t.id)) continue
     const c = cents(t.amount)
     total += c
     const key = t.category_id ?? '__uncat__'   // a uuid has no underscores, so this sentinel can't collide
@@ -109,8 +110,10 @@ export function spendingBreakdown(txns, cats) {
 // and a deficit negative. Same slice as the breakdown (the month on screen), so
 // the two Reflect cards always describe the same window.
 export function cashFlow(txns) {
+  const parents = splitParentIds(txns)
   let income = 0, expense = 0
   for (const t of txns) {
+    if (parents.has(t.id)) continue           // container row; children carry the money
     const c = cents(t.amount)
     if (t.kind === 'income') income += c
     else expense += c
@@ -173,11 +176,95 @@ export function targetNeeded(cat, availableC, ms) {
 // holds money with no shortfall, gray means it has never been touched. `neededC`
 // is the category's needed-this-month from targetNeeded (0 when it has no
 // target), which is what finally makes YNAB's real yellow expressible.
-export function envStatus(availC, neededC) {
+// `snoozed` suppresses the amber: a category whose target you've skipped this
+// month is no longer underfunded, so it drops to green (if it holds money) or
+// gray (if empty) instead of nagging.
+export function envStatus(availC, neededC, snoozed = false) {
   if (availC < 0) return 'over'
-  if (neededC > 0) return 'under'
+  if (neededC > 0 && !snoozed) return 'under'
   if (availC > 0) return 'ok'
   return 'none'
+}
+
+// The ids of split PARENTS in a transaction list: a parent is any row another
+// row points to via parent_id. Its amount is the sum of its children, so every
+// money pass skips parents and counts the children instead — counting both would
+// double the split.
+export const splitParentIds = txns => new Set(txns.filter(t => t.parent_id).map(t => t.parent_id))
+
+// Auto-distribute a split. Given the parent total and the child amounts entered
+// so far (cents; null/0 = a blank row), return the amounts with the remaining
+// balance spread evenly over the blank rows, the rounding penny landing on the
+// last blank. If no row is blank the amounts pass through untouched — the user
+// set them all, and a total that doesn't reconcile is theirs to see. Pure so the
+// split math is selftested.
+export function distributeSplit(totalC, partsC) {
+  const filled = partsC.map(c => c || 0)
+  const blanks = partsC.map((c, i) => (!c ? i : -1)).filter(i => i >= 0)
+  if (!blanks.length) return filled
+  const remain = totalC - filled.reduce((s, c) => s + c, 0)
+  const per = Math.trunc(remain / blanks.length)
+  blanks.forEach((idx, k) => { filled[idx] = k === blanks.length - 1 ? remain - per * (blanks.length - 1) : per })
+  return filled
+}
+
+// Evaluate a small arithmetic expression from a money input ("5+3.50", "12*2",
+// "(4+6)/2"), returning a Number, or null if it isn't a valid expression. Only
+// digits, . + - * / ( ) and spaces are allowed — anything else returns null, so
+// this never runs arbitrary code (no eval). A plain number passes straight
+// through. Pure + selftested; the amount fields use it so mental math doesn't
+// need a separate calculator.
+export function evalAmount(str) {
+  const s = String(str ?? '').trim()
+  if (!s || !/^[\d.\s+\-*/()]+$/.test(s)) return null
+  const toks = s.match(/\d*\.?\d+|[+\-*/()]/g)
+  if (!toks) return null
+  let i = 0
+  const peek = () => toks[i], eat = () => toks[i++]
+  const factor = () => {
+    if (peek() === '(') { eat(); const v = expr(); if (eat() !== ')') throw 0; return v }
+    if (peek() === '-') { eat(); return -factor() }
+    const n = Number(eat())
+    if (!Number.isFinite(n)) throw 0
+    return n
+  }
+  const term = () => { let v = factor(); while (peek() === '*' || peek() === '/') { const op = eat(); const r = factor(); v = op === '*' ? v * r : v / r } return v }
+  function expr() { let v = term(); while (peek() === '+' || peek() === '-') { const op = eat(); const r = term(); v = op === '+' ? v + r : v - r } return v }
+  try { const v = expr(); return i === toks.length && Number.isFinite(v) ? v : null }
+  catch { return null }
+}
+
+// Age of Money (YNAB's metric), in whole days, or null when there isn't enough
+// banked income to say. FIFO: income dollars queue oldest-first, each expense
+// draws from the front of the queue, and an expense's age is how long those
+// specific dollars sat (spend date minus the income date they came from,
+// amount-weighted within the expense). AoM is the mean age of the last `sample`
+// expenses. Split parents are skipped (their children are the real outflows).
+// ponytail: whole-day resolution, weighted within an expense but a plain mean
+// across them, and it ignores the portion of an expense not covered by banked
+// income rather than inventing an age for it.
+export function ageOfMoney(history, sample = 10) {
+  const parents = splitParentIds(history)
+  const rows = history
+    .filter(t => (t.kind === 'income' || t.kind === 'expense') && !parents.has(t.id))
+    .slice().sort((a, b) => a.occurred_on < b.occurred_on ? -1 : a.occurred_on > b.occurred_on ? 1 : 0)
+  const days = (a, b) => Math.round((Date.parse(b + 'T00:00') - Date.parse(a + 'T00:00')) / 86400000)
+  const q = []            // income lots {date, c}, oldest first
+  const ages = []
+  for (const t of rows) {
+    let c = cents(t.amount)
+    if (t.kind === 'income') { q.push({ date: t.occurred_on, c }); continue }
+    let drawn = 0, weighted = 0
+    while (c > 0 && q.length) {
+      const lot = q[0], take = Math.min(c, lot.c)
+      weighted += take * days(lot.date, t.occurred_on)
+      drawn += take; c -= take; lot.c -= take
+      if (lot.c === 0) q.shift()
+    }
+    if (drawn > 0) ages.push(weighted / drawn)
+  }
+  const last = ages.slice(-sample)
+  return last.length ? Math.round(last.reduce((s, a) => s + a, 0) / last.length) : null
 }
 
 // The whole model. A category keeps what it doesn't spend, and that one rule is
@@ -207,8 +294,9 @@ export function envStatus(availC, neededC) {
 // leaves the hole visible in the category that dug it, which is one cumulative
 // sum instead of a month-by-month walk. Ceiling: if YNAB's exact overspending
 // behaviour is ever wanted, this is the function to rewrite.
-export function rollup(cats, assigns, history, ms) {
+export function rollup(cats, assigns, history, ms, snoozed = null) {
   const acc = new Map(cats.map(c => [c.id, { assigned: 0, activity: 0, available: 0, spent: 0 }]))
+  const parents = splitParentIds(history)
   let assignedAll = 0
   let incomeAll = 0
   let unassignedSpend = 0
@@ -223,6 +311,7 @@ export function rollup(cats, assigns, history, ms) {
   }
 
   for (const t of history) {
+    if (parents.has(t.id)) continue           // container row; its children carry the money
     const amt = cents(t.amount)
     if (!t.category_id) {
       if (t.kind === 'income') incomeAll += amt
@@ -246,7 +335,8 @@ export function rollup(cats, assigns, history, ms) {
   for (const c of cats) {
     const e = acc.get(c.id)
     e.needed = targetNeeded(c, e.available, ms)
-    e.status = envStatus(e.available, e.needed)
+    e.snoozed = snoozed ? snoozed.has(c.id) : false
+    e.status = envStatus(e.available, e.needed, e.snoozed)
   }
 
   return { cats: acc, rta: incomeAll - unassignedSpend - assignedAll }
@@ -337,6 +427,55 @@ if (location.search.includes('selftest')) {
   eq(envStatus(5000, 0), 'ok', 'money left, no shortfall')
   eq(envStatus(2000, 1000), 'under', 'a target with a shortfall is underfunded')
   eq(envStatus(0, 0), 'none', 'never touched')
+  eq(envStatus(2000, 1000, true), 'ok', 'a snoozed shortfall with money is green, not amber')
+  eq(envStatus(0, 1000, true), 'none', 'a snoozed empty target is gray, not amber')
+  eq(envStatus(-1, 1000, true), 'over', 'snooze never hides an actual overspend')
+
+  // distributeSplit: blanks share the remainder, penny on the last blank; a fully
+  // filled split is returned untouched even if it doesn't reconcile.
+  eq(distributeSplit(10000, [3000, 0]).join(','), '3000,7000', 'one blank absorbs the rest')
+  eq(distributeSplit(10000, [0, 0]).join(','), '5000,5000', 'two blanks split evenly')
+  eq(distributeSplit(10001, [0, 0]).join(','), '5000,5001', 'the rounding penny lands on the last blank')
+  eq(distributeSplit(10000, [4000, 6000]).join(','), '4000,6000', 'a full split passes through')
+  eq(distributeSplit(10000, [8000, 0, 0]).join(','), '8000,1000,1000', 'remainder spreads over the blanks only')
+
+  // evalAmount: the money-field calculator. Arithmetic in, Number or null out,
+  // never eval.
+  eq(evalAmount('5+3.50'), 8.5, 'adds')
+  eq(evalAmount('12*2'), 24, 'multiplies')
+  eq(evalAmount('(4+6)/2'), 5, 'parens and precedence')
+  eq(evalAmount('10 - 1.5'), 8.5, 'spaces are fine')
+  eq(evalAmount('42'), 42, 'a plain number passes through')
+  eq(evalAmount(''), null, 'empty is null')
+  eq(evalAmount('5+'), null, 'a dangling operator is null, not a throw')
+  eq(evalAmount('alert(1)'), null, 'letters are refused — no code runs')
+  eq(evalAmount('1;2'), null, 'a stray token is refused')
+
+  // Splits: a parent (the container) plus children that carry the categories. The
+  // parent's amount must never be counted — only the children.
+  const SPLIT = [
+    { id: 'p', category_id: null, kind: 'expense', amount: 100, occurred_on: '2026-07-05' },
+    { id: 'c1', parent_id: 'p', category_id: 'g', kind: 'expense', amount: 70, occurred_on: '2026-07-05' },
+    { id: 'c2', parent_id: 'p', category_id: 'f', kind: 'expense', amount: 30, occurred_on: '2026-07-05' },
+    { id: 'i',  category_id: null, kind: 'income', amount: 500, occurred_on: '2026-07-01' }
+  ]
+  const sroll = rollup([{ id: 'g' }, { id: 'f' }], [], SPLIT, '2026-07-01')
+  eq(sroll.cats.get('g').available, -7000, 'a split child hits its own category')
+  eq(sroll.cats.get('f').available, -3000, 'the other child hits the other category')
+  eq(sroll.rta, 50000, 'the split parent is not counted as uncategorized spend')
+  const scf = cashFlow(SPLIT)
+  eq(scf.expense, 10000, 'cashflow counts the children once, not parent + children')
+  const sbd = spendingBreakdown(SPLIT, [{ id: 'g', name: 'Groceries' }, { id: 'f', name: 'Fun' }])
+  eq(sbd.total, 10000, 'the breakdown counts the children, not the parent')
+  eq(sbd.rows.length, 2, 'the parent adds no Uncategorized bucket')
+
+  // Age of Money: FIFO income-to-expense. $100 banked on the 1st, $40 spent on the
+  // 11th -> those dollars sat 10 days.
+  eq(ageOfMoney([
+    { id: 'a', kind: 'income',  amount: 100, occurred_on: '2026-07-01' },
+    { id: 'b', kind: 'expense', amount: 40,  occurred_on: '2026-07-11' }
+  ]), 10, 'age is the days money sat before it was spent')
+  eq(ageOfMoney([{ id: 'a', kind: 'income', amount: 100, occurred_on: '2026-07-01' }]), null, 'no spending yet is null, not zero')
 
   eq(monthsLeft('2026-07-01', '2026-07-31'), 1, 'due this month is one month')
   eq(monthsLeft('2026-07-01', '2026-09-15'), 3, 'jul aug sep is three months')

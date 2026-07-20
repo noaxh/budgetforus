@@ -904,6 +904,82 @@ dialog[open]::backdrop {
 /* New-budget action sits under a hairline, set apart from the list of budgets. */
 .menu-add { margin-top: var(--s2); border-top: 1px solid var(--hairline); border-radius: 0 0 var(--r-ctl) var(--r-ctl); }
 
+/* ---- view-bar (focused views) ---------------------------------------------------
+   KIT: a horizontal strip of filter chips over the plan. render() fills it; the
+   active chip is brand-filled, empty views disable. Scrolls sideways on phone.
+   MARKUP  (render() writes this into #view-bar)
+     <button class="view-chip is-active" data-view="under">Underfunded
+       <span class="view-n num">3</span></button>
+   TOKENS  brand, ink, r-pill, fs-meta/micro */
+.view-bar { display: flex; gap: var(--s2); overflow-x: auto; margin-bottom: var(--s3); scrollbar-width: none; }
+.view-bar::-webkit-scrollbar { display: none; }
+.view-bar:empty { display: none; }
+.view-chip {
+  flex: none; display: inline-flex; align-items: center; gap: var(--s1);
+  min-height: 34px; padding: 6px var(--s3);
+  border-radius: var(--r-pill);
+  background-color: rgba(32, 40, 42, 0.06);
+  color: var(--ink); font-size: var(--fs-meta); font-weight: 700;
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-press) ease;
+}
+.view-chip:active { transform: scale(0.96); }
+.view-chip.is-active { background: var(--brand); color: #fff; }
+.view-chip:disabled { opacity: 0.4; pointer-events: none; }
+.view-n { font-size: var(--fs-micro); font-weight: 800; opacity: 0.8; }
+@media (hover: hover) and (pointer: fine) { .view-chip:not(.is-active):not(:disabled):hover { background-color: rgba(32, 40, 42, 0.1); } }
+
+/* cat-avail is a tappable button now (opens the move / cover sheet). Keeps its
+   grid slot; sizes to the pill so the focus ring hugs it. */
+.cat-avail { justify-self: end; border-radius: var(--r-pill); transition: transform var(--t-press) var(--ease-out); }
+.cat-avail:active { transform: scale(0.96); }
+/* Snooze mark on the Available pill: a small Zz glyph before the state label. */
+.avail .zzz { width: 11px; height: 11px; vertical-align: -1px; margin-right: 3px; }
+
+/* ---- move / cover sheet -----------------------------------------------------------
+   KIT: the quick-move interaction. Uses the sheet kit; the head carries the
+   category's live Available pill. app.js openMove() fills From/To. */
+#move-avail { flex: none; }
+
+/* ---- split (transaction sheet) ----------------------------------------------------
+   KIT: split-across-categories rows inside the txn sheet. The amount field above
+   becomes the total; each row carries a category + share; blanks auto-distribute.
+   MARKUP  (renderSplits() writes rows into #split-list)
+     <div class="split-row"><select data-splitcat="0">…</select>
+       <input data-splitamt="0"><button class="row-del" data-splitdel="0">×</button></div>
+   TOKENS  hairline, ok-fg/under-fg, fs-meta */
+.split-toggle { width: 100%; margin-top: 14px; }
+#split-section { margin-top: var(--s3); }
+.split-row { display: flex; align-items: center; gap: var(--s2); padding: var(--s1) 0; }
+.split-row select { flex: 1; min-width: 0; }
+.split-row input { width: 100px; flex: none; text-align: right; }
+.split-row + .split-row { border-top: 1px solid var(--hairline); }
+.split-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-top: var(--s3); }
+.split-actions .btn-quiet { padding: 8px var(--s3); min-height: 38px; font-size: var(--fs-meta); }
+.split-remain { margin-left: auto; font-size: var(--fs-meta); font-weight: 800; }
+.split-remain.ok  { color: var(--ok-fg); }
+.split-remain.off { color: var(--under-fg); }
+
+/* Extra actions on an existing transaction (duplicate / make recurring). */
+.txn-extra { display: flex; gap: var(--s2); margin-top: var(--s4); }
+.txn-extra .btn-quiet { flex: 1; }
+
+/* Add-now button on a recurring rule row. */
+.rec-now { flex: none; padding: 6px var(--s3); min-height: 34px; font-size: var(--fs-meta); }
+
+/* ---- aom (Age of Money report) ----------------------------------------------------
+   KIT: the Reflect Age-of-Money card — a big day count beside a short read of
+   what it means. render() fills #reflect-aom, or leaves it empty until there's
+   income to measure. The number is days (not money), so it is NOT a .num and
+   never blurs under hide-amounts.
+   TOKENS  brand, ink-2, font-display, fs-micro */
+.aom { display: flex; align-items: center; gap: var(--s4); margin-top: var(--s4); }
+.aom-val { flex: none; display: flex; flex-direction: column; align-items: center; line-height: 1.05; min-width: 64px; }
+.aom-val b { font-family: var(--font-display); font-size: 34px; font-weight: 800; color: var(--brand); }
+.aom-val span { font-size: var(--fs-micro); font-weight: 700; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.aom-body { min-width: 0; }
+.aom-body .muted-strong { color: var(--ink); font-weight: 800; }
+.aom-body p { margin-top: var(--s1); }
+
 /* ================================ §4 SCREENS ============================== */
 
 /* Per-tab chrome: only Budget shows the RTA banner; only Budget + Accounts

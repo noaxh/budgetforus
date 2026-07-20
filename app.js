@@ -1,7 +1,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
-  prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, txnMatches, rollup, recurringOccurrences
+  prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, txnMatches, rollup, recurringOccurrences,
+  splitParentIds, distributeSplit, evalAmount, ageOfMoney
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -15,8 +16,13 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], editing: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '' }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null }
 const $ = id => document.getElementById(id)
+
+// One rollup for the whole app, snooze-aware. Every screen and action reads the
+// same numbers, so the four states and Ready to Assign never disagree between
+// the banner, the table, and an auto-assign preview.
+const rollNow = () => rollup(state.cats, state.assigns, state.history, monthStart(state.month), state.snoozed)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
 // ---------------------------------------------------------------- data
@@ -29,9 +35,9 @@ async function loadBudgets() {
 }
 
 async function loadMonth() {
-  if (!state.budgetId) { state.cats = []; state.txns = []; state.history = []; state.assigns = []; state.recurring = []; return }
+  if (!state.budgetId) { state.cats = []; state.txns = []; state.history = []; state.assigns = []; state.recurring = []; state.snoozed = new Set(); return }
   const ms = monthStart(state.month)
-  const [c, t, r, a] = await Promise.all([
+  const [c, t, r, a, sn] = await Promise.all([
     sb.from('categories').select('*').eq('budget_id', state.budgetId).order('sort').order('name'),
     // Everything up to the end of this month, not just this month: last year's
     // leftovers are part of this month's Available.
@@ -47,17 +53,21 @@ async function loadMonth() {
     sb.from('recurring').select('*').eq('budget_id', state.budgetId)
       .eq('active', true).order('day_of_month'),
     sb.from('assignments').select('category_id,month,amount').eq('budget_id', state.budgetId)
-      .lte('month', ms)
+      .lte('month', ms),
+    // Only this month's snoozes matter — a snooze is per category per month.
+    sb.from('target_snoozes').select('category_id').eq('budget_id', state.budgetId).eq('month', ms)
   ])
   if (c.error) return fail(c.error)
   if (t.error) return fail(t.error)
   if (r.error) return fail(r.error)
   if (a.error) return fail(a.error)
+  if (sn.error) return fail(sn.error)
   state.cats = c.data ?? []
   state.history = t.data ?? []
   state.txns = state.history.filter(x => x.occurred_on >= ms)
   state.recurring = r.data ?? []
   state.assigns = a.data ?? []
+  state.snoozed = new Set((sn.data ?? []).map(s => s.category_id))
 }
 
 // Rule occurrences due in the month on screen that have no transaction yet, as
@@ -116,24 +126,48 @@ const unfilledCats = roll =>
 // drift, then convert to dollars for assign(). Every mode derives from data we
 // already hold: assigns (every month up to this one) and history (every txn up
 // to this month's end), so "last month" is always in hand.
-function autoAssignRows(mode, roll) {
+function autoAssignRows(mode, roll, scope = null) {
   const ms = monthStart(state.month)
   const prev = prevMonthStart(ms)
   const prevEnd = monthEnd(new Date(prev + 'T00:00'))
+  // scope restricts a run to one category group (or all when null). Everything
+  // below maps over this list, so every mode is group-scopable for free.
+  const inScope = c => !scope || (c.group_name || '') === scope
+  const scoped = state.cats.filter(inScope)
   const row = (c, amount) => ({ budget_id: state.budgetId, category_id: c.id, month: ms, amount })
-  const lastAssigned = id =>
-    state.assigns.filter(a => a.category_id === id && a.month === prev).reduce((s, a) => s + cents(a.amount), 0) / 100
+  const assignedIn = (id, m) => state.assigns.filter(a => a.category_id === id && a.month === m).reduce((s, a) => s + cents(a.amount), 0)
+  // The N month-starts before `ms`, newest first — the window the averages read.
+  const backMonths = n => { const out = []; let m = ms; for (let i = 0; i < n; i++) { m = prevMonthStart(m); out.push(m) } return out }
+  const AVG_N = 3
   switch (mode) {
-    case 'target': return unfilledCats(roll).map(c => row(c, c.monthly_limit))
+    case 'target': return unfilledCats(roll).filter(inScope).map(c => row(c, c.monthly_limit))
     // Fund every target to what it needs this month, topping up whatever is
     // already assigned. 'target' above is the special case of this that only
-    // touches empty envelopes; 'fund' also tops up the partly-assigned ones.
-    // assign() replaces the month's amount, so the new amount is this month's
-    // assignment plus the remaining shortfall.
-    case 'fund':   return state.cats.map(c => { const e = roll.cats.get(c.id); return e && e.needed > 0 ? row(c, (e.assigned + e.needed) / 100) : null }).filter(Boolean)
-    case 'last':   return state.cats.map(c => row(c, lastAssigned(c.id))).filter(r => r.amount > 0)
-    case 'spent':  return state.cats.map(c => row(c, sumSpentInRange(state.history, c.id, prev, prevEnd) / 100)).filter(r => r.amount > 0)
-    case 'reset':  return state.cats.map(c => row(c, 0))
+    // touches empty envelopes; 'fund' also tops up the partly-assigned ones. A
+    // snoozed target is skipped — you said skip it this month. assign() replaces
+    // the month's amount, so the new amount is this month's assignment plus the
+    // remaining shortfall.
+    case 'fund':   return scoped.map(c => { const e = roll.cats.get(c.id); return e && e.needed > 0 && !e.snoozed ? row(c, (e.assigned + e.needed) / 100) : null }).filter(Boolean)
+    case 'last':   return scoped.map(c => row(c, assignedIn(c.id, prev) / 100)).filter(r => r.amount > 0)
+    case 'spent':  return scoped.map(c => row(c, sumSpentInRange(state.history, c.id, prev, prevEnd) / 100)).filter(r => r.amount > 0)
+    // Average of the last AVG_N months' assigned / spent, months with nothing
+    // counted as zero so a sometimes-funded category averages down honestly.
+    case 'average': return scoped.map(c => { const ms3 = backMonths(AVG_N); return row(c, Math.round(ms3.reduce((s, m) => s + assignedIn(c.id, m), 0) / AVG_N) / 100) }).filter(r => r.amount > 0)
+    case 'avgspent': return scoped.map(c => { const ms3 = backMonths(AVG_N); return row(c, Math.round(ms3.reduce((s, m) => s + sumSpentInRange(state.history, c.id, monthStart(new Date(m + 'T00:00')), monthEnd(new Date(m + 'T00:00'))), 0) / AVG_N) / 100) }).filter(r => r.amount > 0)
+    // Reduce overfunding: pull back anything assigned past its target. Only
+    // targeted, currently-assigned, over-target envelopes; the pull is capped at
+    // what's assigned so it never drives assigned negative.
+    case 'reduce': return scoped.map(c => {
+      const e = roll.cats.get(c.id); const targetC = cents(c.monthly_limit)
+      if (!c.target_kind || !e || e.assigned <= 0) return null
+      const over = e.available - targetC
+      return over > 0 ? row(c, Math.max(0, e.assigned - over) / 100) : null
+    }).filter(Boolean)
+    // Reset available: drop the rollover so Available equals this month's Assigned.
+    // In a cumulative model that means offsetting the carried balance, which can
+    // be a negative assignment (allowed, same as pulling money back by hand).
+    case 'resetavail': return scoped.map(c => { const e = roll.cats.get(c.id); return e ? row(c, (2 * e.assigned - e.available) / 100) : null }).filter(Boolean)
+    case 'reset':  return scoped.map(c => row(c, 0))
     default: return []
   }
 }
@@ -160,7 +194,7 @@ function render() {
   $('add-btn').hidden = !has
   if (!has) { $('rta-banner').innerHTML = ''; return }
 
-  const roll = rollup(state.cats, state.assigns, state.history, monthStart(state.month))
+  const roll = rollNow()
   const totalSpent = sumKind('expense')
   const assignedNow = state.cats.reduce((s, c) => s + (roll.cats.get(c.id)?.assigned ?? 0), 0)
 
@@ -182,7 +216,9 @@ function render() {
   // --- inspector summary card: month totals + Cost to Be Me. CTBM is the sum
   // of every target's needed-this-month vs an expected-income figure the user
   // types (localStorage per budget; a personal what-if, not budget data).
-  const costToBeMe = state.cats.reduce((s, c) => s + (roll.cats.get(c.id)?.needed ?? 0), 0)
+  // Snoozed categories are excluded — you've said skip them this month, so they
+  // don't add to what it costs to be you this month.
+  const costToBeMe = state.cats.reduce((s, c) => { const e = roll.cats.get(c.id); return s + (e && !e.snoozed ? e.needed : 0) }, 0)
   const hasTargets = state.cats.some(c => c.target_kind)
   const incomeC = cents(ctbmIncome())
   const ctbm = hasTargets ? `
@@ -220,8 +256,9 @@ function render() {
   const availPill = e => {
     const label = e.status === 'over' ? 'Overspent'
       : e.status === 'under' ? `Needs ${money(e.needed)}`
+      : e.snoozed ? 'Snoozed'
       : e.status === 'ok' ? 'Funded' : 'Empty'
-    return `<span class="avail s-${e.status}"><b class="num">${money(e.available)}</b><i>${label}</i></span>`
+    return `<span class="avail s-${e.status}${e.snoozed ? ' is-snoozed' : ''}"><b class="num">${money(e.available)}</b><i>${e.snoozed ? '<svg class="zzz" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h6l-6 8h6"/><path d="M14 4h6l-6 6h6"/></svg>' : ''}${label}</i></span>`
   }
 
   // --- cat-row (kit). The pill is Available (everything that rolled in) and
@@ -244,7 +281,7 @@ function render() {
       <div class="cat-meta">
         <div class="cat-assigned">
           <label class="cell-lbl" for="a-${c.id}">Assigned</label>
-          <input class="assign num" id="a-${c.id}" type="number" step="0.01" inputmode="decimal"
+          <input class="assign num" id="a-${c.id}" type="text" inputmode="decimal" autocomplete="off"
                  value="${(e.assigned / 100).toFixed(2)}" data-assign="${c.id}" aria-label="Assigned to ${esc(c.name)}">
         </div>
         <div class="cat-activity">
@@ -252,7 +289,7 @@ function render() {
           <span class="num">${money(e.activity)}</span>
         </div>
       </div>
-      <div class="cat-avail">${availPill(e)}</div>
+      <button class="cat-avail" data-move="${c.id}" aria-label="Move money for ${esc(c.name)}">${availPill(e)}</button>
       <div class="cat-foot">
         <div class="cat-bar"><i style="width:${e.assigned > 0 ? Math.min(100, e.spent / e.assigned * 100) : 0}%"></i></div>
         ${tgt}
@@ -266,15 +303,48 @@ function render() {
   // string (schema-v4), presentation only -- rollup() never sees a group. The
   // header subtotal is Available only; per-column group subtotals are an OPUS
   // seam (add two more .num spans to .group-sums and widen its grid).
+  // --- focused views: filter which categories show, without touching the money.
+  // The predicate reads the rolled entry, so a view always reflects live state;
+  // the active view is remembered in localStorage (state.view).
+  const viewMatch = (c, e) => !e ? false :
+      state.view === 'under'      ? e.status === 'under'
+    : state.view === 'over'       ? e.status === 'over'
+    : state.view === 'overfunded' ? !!c.target_kind && e.available > cents(c.monthly_limit)
+    : state.view === 'available'  ? e.available > 0
+    : state.view === 'snoozed'    ? e.snoozed
+    : true
+  const VIEWS = [
+    ['all', 'All'], ['under', 'Underfunded'], ['over', 'Overspent'],
+    ['available', 'Has money'], ['overfunded', 'Overfunded'], ['snoozed', 'Snoozed']
+  ]
+  const viewCount = v => state.cats.filter(c => {
+    const e = roll.cats.get(c.id)
+    return v === 'all' ? true
+      : v === 'under' ? e?.status === 'under'
+      : v === 'over' ? e?.status === 'over'
+      : v === 'overfunded' ? !!c.target_kind && e && e.available > cents(c.monthly_limit)
+      : v === 'available' ? e && e.available > 0
+      : v === 'snoozed' ? e?.snoozed
+      : false
+  }).length
+  $('view-bar').innerHTML = state.cats.length ? VIEWS.map(([v, label]) => {
+    const n = viewCount(v)
+    return `<button class="view-chip${state.view === v ? ' is-active' : ''}" data-view="${v}"${v !== 'all' && !n ? ' disabled' : ''}>${label}${v === 'all' ? '' : ` <span class="view-n">${n}</span>`}</button>`
+  }).join('') : ''
+
+  const shownCats = state.cats.filter(c => viewMatch(c, roll.cats.get(c.id)))
   const groups = new Map()
-  for (const c of state.cats) {
+  for (const c of shownCats) {
     const g = c.group_name || ''
     if (!groups.has(g)) groups.set(g, [])
     groups.get(g).push(c)
   }
   const order = [...groups.keys()].sort((a, b) => a === '' ? -1 : b === '' ? 1 : a.localeCompare(b))
-  $('categories').innerHTML = state.cats.length
-    ? order.map(g => {
+  $('categories').innerHTML = !state.cats.length
+    ? '<div class="empty">No categories yet. Add some, then give each one a job.</div>'
+    : !shownCats.length
+    ? `<div class="empty">No categories ${VIEWS.find(v => v[0] === state.view)?.[1].toLowerCase()} this month.</div>`
+    : order.map(g => {
         const cats = groups.get(g)
         const rowsHtml = cats.map(catRow).join('')
         if (!g) return rowsHtml
@@ -288,7 +358,6 @@ function render() {
           <div class="group-body">${rowsHtml}</div>
         </details>`
       }).join('')
-    : '<div class="empty">No categories yet. Add some, then give each one a job.</div>'
 
   // --- acct-row (kit): the Accounts screen. Today an "account" is a budget
   // pot; the active one shows its cash balance (all income minus all expenses
@@ -322,9 +391,15 @@ function render() {
   const filterName = state.txnFilter === '__uncat__' ? 'Uncategorized'
     : state.txnFilter ? catName(state.txnFilter) : ''
   const q = state.txnSearch.trim().toLowerCase()
-  const visibleTxns = state.txns.filter(t =>
-    (!state.txnFilter || (t.category_id ?? '__uncat__') === state.txnFilter) &&
-    txnMatches(t, q, catName))
+  // Split children fold into their parent (the register shows one line per split);
+  // the parent's own category is null, so a category filter matches a split when
+  // any of its children is in that category.
+  const parentIds = splitParentIds(state.txns)
+  const childrenOf = pid => state.txns.filter(t => t.parent_id === pid)
+  const inFilter = t => !state.txnFilter
+    || (t.category_id ?? '__uncat__') === state.txnFilter
+    || (parentIds.has(t.id) && childrenOf(t.id).some(ch => (ch.category_id ?? '__uncat__') === state.txnFilter))
+  const visibleTxns = state.txns.filter(t => !t.parent_id && inFilter(t) && txnMatches(t, q, catName))
   $('txn-filter').innerHTML = state.txnFilter
     ? `<div class="filter-chip"><span>${esc(filterName)}</span><button data-clearfilter aria-label="Clear ${esc(filterName)} filter">&times;</button></div>`
     : ''
@@ -342,7 +417,7 @@ function render() {
       ${t.flag ? `<span class="flag-dot" style="background:var(--flag-${t.flag})" title="Flag: ${t.flag}"></span>` : ''}
       <div class="txn-body" ${sel ? `data-sel="${t.id}"` : `data-edit="${t.id}"`}>
         <div class="txn-desc">${esc(t.description) || '<span class="muted">No description</span>'}</div>
-        <div class="txn-meta">${t.occurred_on} &middot; ${esc(catName(t.category_id))}${t.recurring_id ? ' &middot; recurring' : ''}</div>
+        <div class="txn-meta">${t.occurred_on} &middot; ${parentIds.has(t.id) ? `Split &middot; ${childrenOf(t.id).length} categories` : esc(catName(t.category_id))}${t.recurring_id ? ' &middot; recurring' : ''}${t.memo ? ' &middot; ' + esc(t.memo) : ''}</div>
       </div>
       <span class="txn-amt num${t.kind === 'income' ? ' txn-in' : ''}">${t.kind === 'income' ? '+' : '&minus;'}${money(cents(t.amount))}</span>
       ${sel ? '' : `<button class="row-del" data-del="${t.id}" aria-label="Delete transaction">&times;</button>`}
@@ -395,6 +470,19 @@ function render() {
         </button>`
       }).join('')}
     </div>` : '<div class="rows"><div class="empty">Nothing spent in ' + esc(monthLabel(state.month)) + ' yet.</div></div>'
+
+  // Age of Money: how long money sits before it's spent (FIFO over all loaded
+  // history, up to the month on screen). Null until there's banked income to
+  // spend against, so a new budget shows nothing rather than a misleading zero.
+  const aom = ageOfMoney(state.history)
+  $('reflect-aom').innerHTML = aom == null ? '' : `
+    <div class="card aom">
+      <div class="aom-val"><b>${aom}</b><span>day${aom === 1 ? '' : 's'} old</span></div>
+      <div class="aom-body">
+        <span class="small muted-strong">Age of Money</span>
+        <p class="small muted">How long your money typically sits before you spend it. Higher means you're spending income from further back, not paycheque to paycheque.</p>
+      </div>
+    </div>`
 }
 
 async function refresh() {
@@ -474,12 +562,24 @@ switchTab(location.hash.slice(1) || 'budget')
 // already detached the element, losing the change. Click is synchronous and
 // runs before the default action flips `open`, so the new state is !open.
 $('categories').addEventListener('click', e => {
+  const mv = e.target.closest('[data-move]')
+  if (mv) return openMove(mv.dataset.move)
   const s = e.target.closest('summary.group-head')
   if (!s) return
   const d = s.parentElement
   if (d.open) state.closedGroups.add(d.dataset.group)
   else state.closedGroups.delete(d.dataset.group)
 })
+
+// Focused views: pick a filter over the plan; remember it across reloads. Only a
+// re-render is needed — the filter is a view over data already loaded.
+$('view-bar').onclick = e => {
+  const b = e.target.closest('[data-view]')
+  if (!b) return
+  state.view = b.dataset.view
+  localStorage.setItem('budget.view', state.view)
+  render()
+}
 
 // Accounts screen: tapping another pot switches to it -- same data path as the
 // header switcher, kept in sync.
@@ -655,9 +755,9 @@ $('export-csv').onclick = () => {
   if (!state.txns.length) return
   const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`
   const catName = id => state.cats.find(c => c.id === id)?.name ?? ''
-  const head = ['date', 'description', 'category', 'type', 'amount', 'flag']
+  const head = ['date', 'description', 'category', 'type', 'amount', 'flag', 'memo']
   const body = state.txns.map(t =>
-    [t.occurred_on, t.description, catName(t.category_id), t.kind, Number(t.amount).toFixed(2), t.flag ?? ''].map(cell).join(','))
+    [t.occurred_on, t.description, catName(t.category_id), t.kind, Number(t.amount).toFixed(2), t.flag ?? '', t.memo ?? ''].map(cell).join(','))
   const csv = [head.join(','), ...body].join('\r\n')
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
   const a = document.createElement('a')
@@ -747,19 +847,84 @@ async function assign(rows) {
 $('categories').onchange = e => {
   const id = e.target.dataset.assign
   if (!id) return
-  assign([{
-    budget_id:   state.budgetId,
-    category_id: id,
-    month:       monthStart(state.month),
-    amount:      Number(e.target.value) || 0
-  }])
+  // Validate at the boundary: a non-numeric entry is rejected (and the field put
+  // back) rather than silently emptying the envelope. A bare number or a little
+  // sum ("40+5") both work via the calculator.
+  const v = evalAmount(e.target.value)
+  const roll = rollNow()
+  if (v == null) { e.target.value = ((roll.cats.get(id)?.assigned ?? 0) / 100).toFixed(2); return }
+  assign([{ budget_id: state.budgetId, category_id: id, month: monthStart(state.month), amount: v }])
+}
+
+// ---------------------------------------------------------------- move / cover
+
+// The quick-move / cover sheet — the highest-value envelope interaction. Tapping
+// a category's Available opens it; an overspent one prefills covering the
+// shortfall from Ready to Assign. A move is just two assignment writes (minus the
+// source, plus the destination); Ready to Assign is derived, so an RTA endpoint
+// writes nothing. assign() already logs the Money Move and refreshes.
+function openMove(catId) {
+  const c = state.cats.find(x => x.id === catId)
+  const e = rollNow().cats.get(catId)
+  if (!c || !e) return
+  state.moveCat = catId
+  const over = e.available < 0
+  const opts = sel => `<option value="__rta__"${sel === '__rta__' ? ' selected' : ''}>Ready to Assign</option>` +
+    state.cats.map(x => `<option value="${x.id}"${x.id === sel ? ' selected' : ''}>${esc(x.name)}</option>`).join('')
+  $('move-from').innerHTML = opts(over ? '__rta__' : catId)   // cover: pull IN from RTA; else move OUT to RTA
+  $('move-to').innerHTML   = opts(over ? catId : '__rta__')
+  const prefill = over ? -e.available : (e.available > 0 ? e.available : 0)
+  $('move-amount').value = prefill ? (prefill / 100).toFixed(2) : ''
+  $('move-title').textContent = c.name
+  $('move-avail').className = `avail s-${e.status}`
+  $('move-avail').innerHTML = `<b class="num">${money(e.available)}</b><i>${
+    over ? 'Overspent' : e.status === 'under' ? `Needs ${money(e.needed)}` : e.status === 'ok' ? 'Available' : 'Empty'}</i>`
+  $('move-snooze-wrap').hidden = !c.target_kind
+  $('move-snooze').checked = state.snoozed.has(catId)
+  $('move-err').hidden = true
+  $('move-dialog').showModal()
+}
+
+const moveErr = m => { $('move-err').textContent = m; $('move-err').hidden = false }
+
+async function applyMove() {
+  const from = $('move-from').value, to = $('move-to').value
+  const ms = monthStart(state.month)
+  if (from === to) return moveErr('Choose two different places.')
+  const amt = evalAmount($('move-amount').value)
+  if (amt == null || amt <= 0) return moveErr('Enter an amount greater than zero.')
+  const amtC = cents(amt)
+  const cur = id => cents(state.assigns.find(a => a.category_id === id && a.month === ms)?.amount ?? 0)
+  const rows = []
+  if (from !== '__rta__') rows.push({ budget_id: state.budgetId, category_id: from, month: ms, amount: (cur(from) - amtC) / 100 })
+  if (to   !== '__rta__') rows.push({ budget_id: state.budgetId, category_id: to,   month: ms, amount: (cur(to)   + amtC) / 100 })
+  $('move-dialog').close()
+  if (rows.length) assign(rows)
+}
+$('move-apply').onclick = applyMove
+$('move-cancel').onclick = () => $('move-dialog').close()
+
+// Snooze this category's target for the month on screen: shared budget data, so
+// it writes to Supabase (both partners see it). Toggled live from the move sheet.
+$('move-snooze').onchange = async e => {
+  const catId = state.moveCat, ms = monthStart(state.month)
+  if (e.target.checked) {
+    const { error } = await sb.from('target_snoozes').insert({ budget_id: state.budgetId, category_id: catId, month: ms })
+    if (error) { e.target.checked = false; return fail(error) }
+    state.snoozed.add(catId)
+  } else {
+    const { error } = await sb.from('target_snoozes').delete().eq('category_id', catId).eq('month', ms)
+    if (error) { e.target.checked = true; return fail(error) }
+    state.snoozed.delete(catId)
+  }
+  render()
 }
 
 // The RTA banner's Auto-assign button opens the modes sheet. The rollup is
 // rebuilt per action rather than closed over, because the banner is re-rendered
 // on every refresh and a captured rollup would be stale.
 $('rta-banner').onclick = e => {
-  if (e.target.closest('#auto-assign')) $('aa-dialog').showModal()
+  if (e.target.closest('#auto-assign')) openAutoAssign()
 }
 
 // Expected-income edits persist and re-render the covered/short verdict. Only a
@@ -772,12 +937,20 @@ $('summary').onchange = e => {
   render()
 }
 
+// Open the modes sheet: refresh the group-scope picker from the current groups
+// first (it's a per-run choice, defaulting to all categories).
+function openAutoAssign() {
+  const groups = [...new Set(state.cats.map(c => c.group_name).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  $('aa-scope').innerHTML = `<option value="">All categories</option>` +
+    groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('')
+  $('aa-dialog').showModal()
+}
 $('aa-dialog').onclick = e => {
   const btn = e.target.closest('[data-aa]')
   if (!btn) return
   if (btn.dataset.aa === 'cancel') return $('aa-dialog').close()
-  const roll = rollup(state.cats, state.assigns, state.history, monthStart(state.month))
-  const rows = autoAssignRows(btn.dataset.aa, roll)
+  const scope = $('aa-scope').value || null
+  const rows = autoAssignRows(btn.dataset.aa, rollNow(), scope)
   $('aa-dialog').close()
   if (rows.length) assign(rows)
 }
@@ -788,41 +961,175 @@ const catOptions = (selected, blank = 'Uncategorized') =>
 
 function openTxn(t) {
   state.editing = t?.id ?? null
-  $('txn-title').textContent = t ? 'Edit transaction' : 'Add transaction'
+  $('txn-title').textContent = t?.id ? 'Edit transaction' : 'Add transaction'
   $('t-kind').value = t?.kind ?? 'expense'
-  $('t-amount').value = t ? t.amount : ''
+  $('t-amount').value = t?.amount != null ? t.amount : ''
   $('t-desc').value = t?.description ?? ''
   $('t-date').value = t?.occurred_on ?? today()
   $('t-cat').innerHTML = catOptions(t?.category_id)
   $('t-flag').value = t?.flag ?? ''
+  $('t-memo').value = t?.memo ?? ''
   // Payees: distinct past descriptions feed the datalist. ponytail: descriptions
   // already are payees, so no payees table -- just autocomplete from history.
   $('payee-list').innerHTML = [...new Set(state.history.map(x => x.description).filter(Boolean))]
     .slice(0, 50).map(d => `<option value="${esc(d)}">`).join('')
+  // Editing an existing split parent? Load its children as split rows.
+  const kids = t?.id ? state.txns.filter(x => x.parent_id === t.id) : []
+  state.splitRows = kids.length ? kids.map(ch => ({ category_id: ch.category_id ?? '', amount: String(ch.amount) })) : null
+  setSplitUI(!!state.splitRows)
+  // Duplicate / make-recurring only make sense on an existing row.
+  $('txn-extra').hidden = !t?.id
   $('txn-err').hidden = true
   $('txn-dialog').showModal()
 }
 
+// Split UI: when on, the single Category field yields to the split list and the
+// amount field becomes the split TOTAL. state.splitRows is the source of truth;
+// renderSplits paints it, and the "remaining" figure keeps the parts honest.
+function setSplitUI(on) {
+  if (on && !state.splitRows) state.splitRows = [{ category_id: '', amount: '' }, { category_id: '', amount: '' }]
+  if (!on) state.splitRows = null
+  $('t-cat-field').hidden = on
+  $('split-section').hidden = !on
+  $('split-toggle').textContent = on ? 'Remove split' : 'Split across categories'
+  if (on) renderSplits()
+}
+
+function renderSplits() {
+  const rows = state.splitRows || []
+  $('split-list').innerHTML = rows.map((r, i) => `
+    <div class="split-row">
+      <select data-splitcat="${i}" aria-label="Split category">${catOptions(r.category_id)}</select>
+      <input class="num" type="text" inputmode="decimal" data-splitamt="${i}" value="${esc(r.amount)}" placeholder="0.00" aria-label="Split amount">
+      <button type="button" class="row-del" data-splitdel="${i}" aria-label="Remove split row">&times;</button>
+    </div>`).join('')
+  // Remaining = total − entered parts (blanks count as zero). Green when it
+  // reconciles, amber otherwise; the distribute button spreads it over blanks.
+  const totalC = cents(evalAmount($('t-amount').value) ?? 0)
+  const enteredC = rows.reduce((s, r) => s + cents(evalAmount(r.amount) ?? 0), 0)
+  const remainC = totalC - enteredC
+  $('split-remain').className = `split-remain ${remainC === 0 ? 'ok' : 'off'} num`
+  $('split-remain').textContent = remainC === 0 ? 'Splits add up' : `${money(remainC)} left to assign`
+}
+
+const txnErr = m => { $('txn-err').textContent = m; $('txn-err').hidden = false }
+
 $('txn-form').onsubmit = async e => {
   e.preventDefault()
   if (!state.budgetId) return fail(new Error('Create a budget first.'))
-  const row = {
+  const amount = evalAmount($('t-amount').value)
+  if (amount == null || amount <= 0) return txnErr('Amount must be more than zero.')
+  const base = {
     budget_id:   state.budgetId,
     kind:        $('t-kind').value,
-    amount:      Number($('t-amount').value),
+    amount,
     description: $('t-desc').value.trim(),
-    category_id: $('t-cat').value || null,
     occurred_on: $('t-date').value,
-    flag:        $('t-flag').value || null
+    flag:        $('t-flag').value || null,
+    memo:        $('t-memo').value.trim() || null
   }
-  if (!(row.amount > 0)) { $('txn-err').textContent = 'Amount must be more than zero.'; $('txn-err').hidden = false; return }
 
-  const { error } = state.editing
-    ? await sb.from('transactions').update(row).eq('id', state.editing)
-    : await sb.from('transactions').insert(row)
-  if (error) { $('txn-err').textContent = error.message; $('txn-err').hidden = false; return }
+  if (state.splitRows) {
+    // A split: the parent carries the total and no category; children carry the
+    // categories and their shares. Blanks auto-distribute the remainder.
+    const raw = state.splitRows.map(r => ({ category_id: r.category_id || null, c: cents(evalAmount(r.amount) ?? 0) }))
+    const dist = distributeSplit(cents(amount), raw.map(r => r.c))
+    raw.forEach((r, i) => { r.c = dist[i] })
+    const kids = raw.filter(r => r.c !== 0)
+    if (kids.length < 2) return txnErr('A split needs at least two categories with amounts.')
+    if (kids.some(k => k.c < 0)) return txnErr('The splits add up to more than the total.')
+    if (kids.reduce((s, k) => s + k.c, 0) !== cents(amount)) return txnErr("The splits don't add up to the total.")
+    const err = await saveSplit({ ...base, category_id: null }, kids)
+    if (err) return txnErr(err)
+  } else {
+    const row = { ...base, category_id: $('t-cat').value || null }
+    // Editing a row that used to be a split: drop the now-orphaned children.
+    if (state.editing) await sb.from('transactions').delete().eq('parent_id', state.editing)
+    const { error } = state.editing
+      ? await sb.from('transactions').update({ ...row, parent_id: null }).eq('id', state.editing)
+      : await sb.from('transactions').insert(row)
+    if (error) return txnErr(error.message)
+  }
   $('txn-dialog').close()
   refresh()
+}
+
+// Write a split parent + its children. On edit: update the parent, then replace
+// its children (delete then re-insert — simplest correct, and a split is never
+// large). On create: insert the parent, then children pointing at its new id.
+async function saveSplit(parent, kids) {
+  let parentId = state.editing
+  if (parentId) {
+    const { error } = await sb.from('transactions').update({ ...parent, parent_id: null }).eq('id', parentId)
+    if (error) return error.message
+    const { error: dErr } = await sb.from('transactions').delete().eq('parent_id', parentId)
+    if (dErr) return dErr.message
+  } else {
+    const { data, error } = await sb.from('transactions').insert(parent).select('id').single()
+    if (error) return error.message
+    parentId = data.id
+  }
+  const childRows = kids.map(k => ({
+    budget_id: parent.budget_id, kind: parent.kind, amount: k.c / 100,
+    description: parent.description, category_id: k.category_id || null,
+    occurred_on: parent.occurred_on, parent_id: parentId
+  }))
+  const { error } = await sb.from('transactions').insert(childRows)
+  return error ? error.message : null
+}
+
+// Split controls: toggle, add a row, edit a row, remove a row, and the
+// auto-distribute of the remainder over blank rows. state.splitRows is the model;
+// renderSplits repaints. Amount fields accept the calculator ("12.50/2").
+$('split-toggle').onclick = () => setSplitUI(!state.splitRows)
+$('split-add').onclick = () => { state.splitRows.push({ category_id: '', amount: '' }); renderSplits() }
+$('split-distribute').onclick = () => {
+  const totalC = cents(evalAmount($('t-amount').value) ?? 0)
+  const dist = distributeSplit(totalC, state.splitRows.map(r => cents(evalAmount(r.amount) ?? 0)))
+  state.splitRows.forEach((r, i) => { r.amount = (dist[i] / 100).toFixed(2) })
+  renderSplits()
+}
+$('split-list').onchange = e => {
+  const ci = e.target.dataset.splitcat, ai = e.target.dataset.splitamt
+  if (ci != null) state.splitRows[ci].category_id = e.target.value
+  else if (ai != null) { state.splitRows[ai].amount = e.target.value; renderSplits() }  // repaint the remaining figure
+}
+$('split-list').onclick = e => {
+  const del = e.target.closest('[data-splitdel]')
+  if (!del) return
+  if (state.splitRows.length <= 2) return   // a split is at least two rows
+  state.splitRows.splice(Number(del.dataset.splitdel), 1)
+  renderSplits()
+}
+// Amount field is the split total when splitting — recompute "remaining" as it
+// changes. Also runs the calculator so "5+3" resolves in place.
+$('t-amount').onchange = e => { const v = evalAmount(e.target.value); if (v != null) e.target.value = v; if (state.splitRows) renderSplits() }
+
+// Duplicate: reopen the current field values as a fresh draft dated today. Reads
+// the form (so in-progress edits carry), and drops split mode — a plain copy.
+$('txn-duplicate').onclick = () => {
+  openTxn({
+    kind: $('t-kind').value, amount: evalAmount($('t-amount').value) ?? undefined,
+    description: $('t-desc').value, category_id: $('t-cat').value || null,
+    flag: $('t-flag').value || null, memo: $('t-memo').value || null, occurred_on: today()
+  })
+}
+
+// Convert to recurring: seed a monthly rule from this transaction (day taken from
+// its date). The rule shows up under Recurring; nothing is auto-added.
+$('txn-recur').onclick = async () => {
+  const amount = evalAmount($('t-amount').value)
+  if (amount == null || amount <= 0) return txnErr('Amount must be more than zero.')
+  const date = $('t-date').value || today()
+  const { error } = await sb.from('recurring').insert({
+    budget_id: state.budgetId, kind: $('t-kind').value, amount,
+    description: $('t-desc').value.trim(), category_id: $('t-cat').value || null,
+    cadence: 'monthly', day_of_month: Number(date.slice(8, 10)) || 1, interval_months: 1, auto_apply: false
+  })
+  if (error) return txnErr(error.message)
+  $('txn-dialog').close()
+  await loadMonth(); render()
+  alert('Saved a monthly recurring rule. Find it under Recurring on the Accounts tab.')
 }
 
 // ---------------------------------------------------------------- categories
@@ -918,6 +1225,9 @@ const cadenceLabel = r =>
   : `monthly, day ${r.day_of_month}`
 
 function renderRec() {
+  // Rules with an occurrence still due this month get an "Add now" button, so a
+  // single rule can be applied without the all-rules "Add them" banner.
+  const pendingIds = new Set(pendingRecurring().map(p => p.rule.id))
   $('rec-list').innerHTML = state.recurring.length ? state.recurring.map(r => `
     <div class="rec-edit">
       <div class="body">
@@ -925,6 +1235,7 @@ function renderRec() {
         <div class="small muted">${cadenceLabel(r)} &middot; ${r.kind}${r.auto_apply ? ' &middot; auto' : ''}${r.category_id ? ` &middot; ${esc(state.cats.find(c => c.id === r.category_id)?.name ?? '')}` : ''}</div>
       </div>
       <span class="num ${r.kind === 'income' ? 'txn-in' : ''}">${r.kind === 'income' ? '+' : ''}${money(cents(r.amount))}</span>
+      ${pendingIds.has(r.id) ? `<button class="btn-quiet rec-now" data-addrec="${r.id}">Add now</button>` : ''}
       <button class="row-del" data-delrec="${r.id}" aria-label="Delete rule">&times;</button>
     </div>`).join('') : '<div class="empty">No rules yet.</div>'
 }
@@ -963,6 +1274,18 @@ $('rec-add').onsubmit = async e => {
 }
 
 $('rec-list').onclick = async e => {
+  // Add now: apply just this rule's occurrences due in the month on screen. Same
+  // idempotent upsert the "Add them" banner uses, so a double-tap can't double-charge.
+  const add = e.target.closest('[data-addrec]')
+  if (add) {
+    const rows = recurringRows(pendingRecurring().filter(p => p.rule.id === add.dataset.addrec))
+    if (!rows.length) return
+    const { error } = await sb.from('transactions')
+      .upsert(rows, { onConflict: 'recurring_id,occurred_on', ignoreDuplicates: true })
+    if (error) return fail(error)
+    await loadMonth(); renderRec(); render()
+    return
+  }
   const b = e.target.closest('[data-delrec]')
   if (!b) return
   if (!confirm('Delete this rule? Transactions it already created stay.')) return
@@ -1088,13 +1411,18 @@ function previewSeed() {
     { category_id: 'pv-dine', month: ms, amount: 60 },
     { category_id: 'pv-trip', month: ms, amount: 200 }
   ]
+  state.snoozed = new Set(['pv-trip'])   // a snoozed by-date target: amber → Snoozed
   state.history = [
     { id: 'pv-t1', category_id: null,      kind: 'income',  amount: 3200,  description: 'Paycheque',      occurred_on: d(1) },
     { id: 'pv-t2', category_id: 'pv-rent', kind: 'expense', amount: 1800,  description: 'Rent',           occurred_on: d(1), recurring_id: 'pv-r1' },
-    { id: 'pv-t3', category_id: 'pv-groc', kind: 'expense', amount: 92.4,  description: 'Metro',          occurred_on: d(3), flag: 'green' },
+    { id: 'pv-t3', category_id: 'pv-groc', kind: 'expense', amount: 92.4,  description: 'Metro',          occurred_on: d(3), flag: 'green', memo: 'weekly shop' },
     { id: 'pv-t4', category_id: 'pv-dine', kind: 'expense', amount: 45.25, description: 'Ramen night',    occurred_on: d(6) },
     { id: 'pv-t5', category_id: 'pv-groc', kind: 'expense', amount: 78.1,  description: 'Costco run',     occurred_on: d(9) },
-    { id: 'pv-t6', category_id: 'pv-dine', kind: 'expense', amount: 52,    description: 'Pizza',          occurred_on: d(11), flag: 'red' }
+    { id: 'pv-t6', category_id: 'pv-dine', kind: 'expense', amount: 52,    description: 'Pizza',          occurred_on: d(11), flag: 'red' },
+    // A split: parent (no category) + two children carrying the categories.
+    { id: 'pv-t7', category_id: null,      kind: 'expense', amount: 60,    description: 'Pharmacy + snacks', occurred_on: d(12) },
+    { id: 'pv-t7a', parent_id: 'pv-t7', category_id: 'pv-groc', kind: 'expense', amount: 38, description: 'Pharmacy + snacks', occurred_on: d(12) },
+    { id: 'pv-t7b', parent_id: 'pv-t7', category_id: 'pv-fun',  kind: 'expense', amount: 22, description: 'Pharmacy + snacks', occurred_on: d(12) }
   ].sort((a, b) => b.occurred_on.localeCompare(a.occurred_on))
   state.txns = state.history.filter(t => t.occurred_on >= ms)
   state.recurring = [{ id: 'pv-r1', description: 'Rent', amount: 1800, kind: 'expense', cadence: 'monthly',

@@ -21,36 +21,42 @@ all derive from it in `rollup()`. Read the v3 section of NOTES.md before touchin
 function: it documents three deliberate divergences from YNAB, and each one looks like a
 bug if you don't know it was a decision.
 
-Roadmap from here. A **full YNAB feature audit** (every feature mapped to
-have/partial/planned/skip) and the phased build plan live in the "YNAB feature parity" and
-"Build plan for the gaps" sections of [NOTES.md](NOTES.md). Read those before starting a
-feature. The phases, in recommended order:
+Roadmap: **"Roadmap v2: YNAB core, Monarch surfaces" in [NOTES.md](NOTES.md) is the live
+plan** (2026-07-17). The "YNAB feature parity" audit in NOTES.md is the reference inventory
+(statuses frozen 2026-07-16); Roadmap v2 owns status and order. Already shipped: Phases A,
+B (targets engine), C (recurring cadences + auto-apply, Money Moves, bulk bar), the Spruce
+& Bone redesign, Phase D reports, the register search bar, and **Phase 1 — envelope
+finishers (2026-07-20, needs `schema-v7.sql` run + deploy)**. Remaining phases, in order:
 
-1. **Phase A — cheap wins + the shell:** stand up the design system (tokens, the category
-   table, the four Available states, the mobile five-tab / desktop sidebar+Inspector shell)
-   per the "Visual and layout spec" in NOTES.md, then category groups, flags/color tags,
-   hide-amounts toggle, payee autocomplete, CSV export, extra auto-assign modes.
-2. **Phase B — targets engine (keystone):** real goal types (by-date, refill-to, sinking)
-   replacing the flat `monthly_limit`, plus the yellow "underfunded" state v3 cannot express,
-   plus Cost to Be Me. Highest value.
-3. **Phase C — richer transactions:** splits, bulk action bar, Money Moves history, and
-   *enhancements only* to the already-shipped `recurring` feature (auto-apply, richer
-   cadence). Recurring itself shipped in v2 (`recurring` table + the Recurring dialog); do
-   not rebuild it or add a second `scheduled_transactions` table.
-4. **Phase D — reflect/reports:** spending breakdown, income vs expense, age of money.
-5. **Phase E — accounts subsystem (OPTIONAL):** multiple accounts, cleared/working balance,
-   reconcile, transfers, tracking accounts + net worth, and credit-card handling. The one
-   fork in the road; decide before Phase C (see Open decisions in NOTES.md). May never be
-   wanted for a two-person joint pot.
-6. **Phase F — standalone/lifecycle:** file-based CSV/OFX import (the sanctioned non-Plaid
-   import), loan/debt calculator, Fresh Start, focused views.
+1. ~~**Envelope finishers.**~~ **Shipped 2026-07-20** (`schema-v7.sql`): quick-move / cover
+   overspending (tap an Available pill), focused views (filter chips over the plan,
+   remembered in localStorage), the remaining auto-assign modes (3-month average assigned /
+   spent, reduce overfunding, reset available, all group-scopable), target snooze (per
+   category per month, `target_snoozes` table, suppresses the amber + Zz mark), split
+   transactions (`transactions.parent_id`; parent is a container, children carry categories,
+   `rollup`/`cashFlow`/`spendingBreakdown` skip parents via `splitParentIds`), the txn
+   micro-features (`memo` column, `evalAmount` calculator in every money field, duplicate,
+   convert-to-recurring, add-now on a rule), and Age of Money (FIFO in `core.js`).
+2. **Home dashboard (Monarch):** landing tab with plan state, spending summary, upcoming
+   recurring, recent transactions, alert cards; hide/reorder stored locally.
+3. **Rules + recurring calendar (Monarch):** description-match rules that set category and
+   flag, retro-apply with preview, payee-memory fallback, calendar of recurring bills.
+4. **Net worth lite:** manual `accounts` + monthly `balance_snapshots`, net worth chart +
+   dashboard card. Transactions never reference accounts (decided 2026-07-17).
+5. **File import:** CSV/OFX drag-drop, column map, dedupe, categorized by the rules.
+6. **Category + plan management:** reorder, notes/icons/colors, hide/archive/merge
+   category, future-month assigning, copy/archive budget, Fresh Start.
+7. **Productivity + QoL:** undo/redo, keyboard shortcuts, PWA manifest, first-run
+   envelope explainer.
 
-Settle-up / who-owes-who stays out unless asked (the shared budget is a joint pot, not split
-costs).
+Parked (build on real demand): loan calculator, real payees table, richer target kinds,
+realtime sync, offline. Settle-up / who-owes-who stays out unless asked (the shared budget
+is a joint pot, not split costs).
 
 Deliberately **not** doing: bank sync via Plaid (costs money, most of the complexity in every
-competitor), subscription cancellation, credit score, mobile native widgets, forecasting,
-public API.
+competitor), the full accounts subsystem and credit-card handling (cut 2026-07-17; balance
+snapshots replace them), subscription cancellation, credit score, receipts/OCR, AI features,
+investments, forecasting, mobile native widgets, public API.
 
 ## Locked decisions — do not relitigate
 
@@ -121,18 +127,22 @@ public API.
 - `sb_secret_…` **bypasses RLS entirely.** Never in client code, never in the repo, never
   in chat. If one appears anywhere it shouldn't, say so and tell Noah to rotate it.
 
-## Open items (as of 2026-07-15)
+## Open items (as of 2026-07-20)
 
+- [ ] **Run `schema-v7.sql` BEFORE deploying Phase 1.** Adds `transactions.parent_id`
+      (splits), `transactions.memo`, and the `target_snoozes` table. Idempotent + guarded
+      like v3–v6. Order matters: run the SQL first, *then* push, or the live client hits
+      missing columns/tables. Paste contents into the budgetforus SQL editor (Ctrl+A first —
+      contents, not the filename). Verified locally via `?selftest` (new core assertions) and
+      `?preview` (splits, move/cover, snooze, focused views, auto-assign modes, Age of Money).
 - [x] ~~**Run `schema-v3.sql`.**~~ Done 2026-07-16. A prior partial run had left the budget
       delete policy behind, so the plain script died on `42710` (policy already exists); an
       idempotent version ran clean and `schema-v3.sql` is now guarded (drop-if-exists /
       if-not-exists) so future re-runs are safe.
-- [ ] **Run `schema-v4.sql` before (or with) the next deploy.** Adds
-      `categories.group_name` and `transactions.flag`, both nullable. The Phase A client
-      writes a `flag` on every transaction and a `group_name` on categories, so until this
-      runs, **adding a transaction or category errors** with "column ... does not exist".
-      Idempotent; paste the contents (Ctrl+A first). Run the SQL FIRST, then push the code,
-      so there is never a window where the new code hits missing columns.
+- [x] ~~**Run `schema-v4/v5/v6.sql`.**~~ All shipped. v4 (`group_name`, `flag`) with Phase A,
+      v5 (targets engine) with Phase B, v6 (recurring cadences) with Phase C. When adding the
+      next migration: run the SQL FIRST, then push the code, so the new client never hits
+      missing columns.
 - [x] ~~Rotate `sb_secret_…`~~ — done 2026-07-15.
 - [ ] **Onboard the friend, then close signups.** Sign-ups are deliberately still ON —
       closing them before the friend registers would lock them out. Order matters:

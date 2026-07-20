@@ -428,6 +428,9 @@ this app. The point is not to build all of it. It is to have a single place that
 says, for every YNAB feature, whether we have it, are missing it, or are choosing
 to skip it, so the roadmap is a set of decisions rather than a set of surprises.
 
+(Status columns frozen 2026-07-16. "Roadmap v2" below owns live status and
+order.)
+
 Status legend:
 
 - **HAVE** — shipped and working.
@@ -452,6 +455,41 @@ Status legend:
 | Over-assigning (red Ready to Assign) | HAVE | v3 |
 | Cash overspending (red Available) | HAVE | v3 |
 | Credit overspending (yellow Available) | SKIP | no credit-card subsystem, see below |
+| Future-month budgeting (navigate ahead, assign) | PLANNED | month picker already moves; assigning in a not-yet-current month + carrying it forward is the gap. This is *assigning money you have* into a future month, NOT forecasting money you don't (that stays SKIP) |
+| Budget history (scroll back through past months) | PARTIAL | past months render read-through from history; a "what changed when" view is Money Moves (below) |
+| Move money between categories (Whack-a-Mole) | PARTIAL | reassign works; no dedicated "move $X from A to B" quick UI |
+| Cover overspending from another category | PLANNED | one-tap on a red Available to pull the shortfall from another category or from Ready to Assign. Same quick-move UI as above |
+
+### Auto Assign (the modes sheet)
+
+| YNAB mode | Status | Note |
+|---|---|---|
+| Assigned Last Month | HAVE | 2026-07-16 |
+| Spent Last Month | HAVE | 2026-07-16 |
+| Reset Assigned (clear to zero) | HAVE | 2026-07-16 |
+| Fill to target ("Underfunded") | PLANNED | needs Phase B targets; deferred with them |
+| Average Assigned | PLANNED | mean of prior N months assigned |
+| Average Spent | PLANNED | mean of prior N months activity |
+| Reduce Overfunding | PLANNED | pull back anything assigned past its target |
+| Reset Available | PLANNED | set Available back to Assigned (drop rollover) |
+| Bulk Auto Assign (run a mode across all / a group) | PLANNED | one action over every category or a selected group |
+
+### Category management
+
+| YNAB feature | Status | Note |
+|---|---|---|
+| Category groups | HAVE | label-based, schema-v4 |
+| Custom categories | HAVE | |
+| Reorder / drag-and-drop ordering | PLANNED | `categories.sort_order`; drag on desktop, up/down on mobile |
+| Collapse / expand groups | PLANNED (light) | per-group open state in localStorage |
+| Category notes | PLANNED (light) | `categories.note` text |
+| Category emojis / icons | PLANNED (light) | `categories.icon`; emoji is free, no icon set to ship |
+| Category colors | PLANNED (light) | `categories.color`, same 6-swatch palette as flags |
+| Hide category | PLANNED | `categories.hidden`; drops from the plan, keeps history |
+| Archive category | PLANNED | soft state distinct from delete; keeps history, no rollover |
+| Delete category | HAVE | with the RTA-shift warning (see discrepancies) |
+| Category progress indicator | PLANNED | the target progress bar; falls out of Phase B |
+| Pin favourite categories | SKIP | mobile nicety |
 
 ### Targets / goals (the keystone gap)
 
@@ -459,9 +497,27 @@ Status legend:
 |---|---|---|
 | Targets (spend / save / set-aside per category) | PLANNED | `monthly_limit` is a one-type proto-target today |
 | Goal types: monthly, weekly, by-date, "have a balance of", "set aside another" | PLANNED | by-date needs remaining / months-left math |
+| Yearly / annual target | PLANNED | a by-date target one year out, or an annual cadence; fold into the kind list |
+| Refill Up To / Set Aside Another / Pay Specific Amount / Pay Off By Date | PLANNED | YNAB's exact wording for the kinds above; same math |
+| Progress bars | PLANNED | per-category fill vs needed; the category progress indicator |
 | Underfunded (yellow) state | PLANNED | falls out of targets; this is what brings back YNAB's yellow |
+| Underfunded calculation + auto-funding suggestion | PLANNED | "$X to fund" per category and the fill-to-target Auto Assign mode |
+| Snooze target (skip a month) | PLANNED (light) | a per-category per-month "skip" flag so a snoozed target does not count as underfunded |
+| Edit / delete target | PLANNED | part of the target editor |
+| Copy target to another category | PLANNED (light) | duplicate a target definition; cheap once the editor exists |
 | Cost to Be Me | PLANNED | sum of month's targets vs entered expected income; one header stat once targets exist |
 | Category / plan templates | SKIP | targets across all categories already are the template; import/export is low value for two people |
+
+### Budget / focused views
+
+| YNAB feature | Status | Note |
+|---|---|---|
+| Default budget view | HAVE | the plan screen |
+| Underfunded / Overfunded / Assigned / Available views | PLANNED (light) | client-side filters over the already-loaded categories; no schema |
+| Snoozed view | PLANNED (light) | needs the snooze flag above |
+| Custom Focused Views (save a filter set) | PLANNED | `views` in localStorage first, a table only if it must sync; up-to-12 cap is arbitrary, no hard limit |
+| Persistent / saved views | PLANNED | remember the last active view |
+| Auto Assign within a view | PLANNED | run a mode over only the view's categories; depends on Bulk Auto Assign + views |
 
 ### Accounts and balances
 
@@ -497,22 +553,57 @@ Status legend:
 |---|---|---|
 | Add / edit / delete | HAVE | |
 | Scheduled / recurring transactions | HAVE (basic) | shipped in v2 as the `recurring` table: day-of-month rules, explicit per-month "Add them", once-per-month unique index. Enhance later, do not rebuild |
-| Split transactions | PLANNED | one transaction across categories; child table or `parent_id` |
+| Split transactions | PLANNED | one transaction across categories; `parent_id` self-ref, parent nets to split total, children carry categories. Changes `rollup()` |
+| Auto-distribute split amounts | PLANNED (light) | ships with splits; even-split the remainder across the child rows |
+| Split templates | SKIP | reuse a saved split; low value for two people until splits themselves prove used |
+| Transaction memo / notes | PLANNED (light) | a free-text `memo` on the row, shown in the register and edit sheet |
+| Transaction calculator (math in the amount field) | PLANNED (light) | evaluate `5+3.50` in the money input; client only, no schema |
+| Duplicate transaction | PLANNED (light) | copy a row into a new draft |
+| Convert to recurring | PLANNED (light) | seed a `recurring` rule from an existing transaction |
+| Enter scheduled transaction immediately | PLANNED (light) | "add now" on a recurring rule instead of waiting for month open |
 | Payees | HAVE (light) | `description` autocompletes from distinct past descriptions via a datalist, no payees table (ponytail, 2026-07-16) |
 | Flags / color tags | HAVE (light) | `transactions.flag` (schema-v4, 6-colour check), flag picker in the txn sheet, coloured dot on the row. Filter-by-flag still to add (2026-07-16) |
 | Bulk action bar (multi-select) | PLANNED (light) | select rows, categorize / flag / delete together |
+| Bulk memo / payee / flag edit | PLANNED (light) | extra actions on the same bulk bar |
+| Selected-transaction running total | PLANNED (light) | sum of the multi-selected rows, shown in the bulk bar |
 | Export transactions to CSV | HAVE (light) | Export button dumps the month on screen (`state.txns`) to CSV (2026-07-16) |
+| Receipt / photo attachments | SKIP (later) | needs Supabase Storage + a bucket; real lift, revisit only if wanted |
 | Transfers between accounts | OPTIONAL | needs accounts |
-| Approve / match imported | SKIP | only with import |
+| Approve / reject / match imported | SKIP | only meaningful with bank import |
 | Pin frequent categories | SKIP | nicety |
+
+### Payees (if the light datalist is outgrown)
+
+| YNAB feature | Status | Note |
+|---|---|---|
+| Payee autocomplete | HAVE (light) | datalist over distinct past descriptions, no table |
+| Real payee records (rename / merge / hide) | PLANNED (optional) | a `payees` table only if the datalist proves too loose; medium lift |
+| Auto-categorize by payee | PLANNED (light) | remember the last category used for a payee and pre-fill it; the highest-value payee feature, doable without a full table |
+| Automatic merchant renaming / cleanup | SKIP | needs a rename map; low value at two-person scale |
+| Transfer payees | OPTIONAL | needs accounts |
+
+### Search & filtering
+
+| YNAB feature | Status | Note |
+|---|---|---|
+| Search by payee / category / memo / amount / date / flag | PLANNED | one search box + filter chips over the loaded transactions; client-side, no schema |
+| Exact / phrase match | PLANNED (light) | quoted-substring match in the same box |
+| Filter transactions (by the above) | PLANNED | the chip row |
+| Saved filters | PLANNED (light) | same store as Focused Views |
+| Search by cleared status | OPTIONAL | needs the accounts / cleared subsystem |
 
 ### Reflect / reports
 
 | YNAB feature | Status | Note |
 |---|---|---|
 | Spending breakdown (by category) | PLANNED | charts were deprioritized, but this one changes decisions |
+| Spending trends / historical | PLANNED (light) | the breakdown over a multi-month range instead of one month |
+| Average spending | PLANNED (light) | mean per-category over the range; a column on the breakdown |
 | Income vs Expense (cash flow) | PLANNED (light) | one table per month range |
 | Age of Money | PLANNED (light) | derivable from transaction history; niche |
+| Drill into a report category | PLANNED (light) | click a slice/bar to the filtered transaction list (reuses Search) |
+| Export report data (CSV) | PLANNED (light) | same CSV path as the transaction export |
+| Share report image / hide balances while sharing | PARTIAL | hide-amounts already blurs; a dedicated share-image is SKIP (native share, low value) |
 | Net Worth report | OPTIONAL | needs tracking accounts |
 | Money Moves (history of category moves) | PLANNED (light) | log assignment changes, show the trail |
 
@@ -528,121 +619,262 @@ Status legend:
 | YNAB feature | Status | Note |
 |---|---|---|
 | Multi-device sync | HAVE | Supabase |
-| Multiple plans / budget switcher | HAVE | v3 |
+| Multiple / unlimited plans / budget switcher | HAVE | v3; no cap |
 | Delete a budget / plan | HAVE | type-the-name confirm, cascades to every category, transaction, assignment and rule; `members delete budget` policy (schema-v3), handler + danger-zone button shipped. See "Deleting budgets" section |
 | Rename a budget / plan | HAVE | pencil button beside the switcher, native prompt, `members rename budget` policy; also the fix for two budgets sharing a name |
+| Copy a budget / plan | PLANNED (light) | clone categories + targets into a new empty plan (no transactions); cheap |
+| Archive a budget / plan | PLANNED (light) | a `budgets.archived` flag hides it from the switcher without deleting |
 | YNAB Together (share one sub, up to 6) | PARTIAL | `budget_members` already supports N members; sharing model differs but the capability is there |
+| Permission management (member roles) | PLANNED (optional) | a role column on `budget_members`; low value while it is two trusted people, so optional |
+| Educational onboarding / first-run tour | PLANNED (light) | a dismissable first-run explainer for the envelope model; the model is where people bounce off |
 | Hide amounts toggle | HAVE | header eye toggle blurs every `.num`/`.pill`, remembered in localStorage (2026-07-16) |
-| Focused / customizable views | PLANNED (light) | show/hide columns, collapse groups |
+| Focused / customizable views | PLANNED (light) | see the Budget / focused views table above |
 | Fresh Start / Plan Reset | PLANNED | archive current plan, keep categories / targets / scheduled / payees |
 | Offline access | SKIP (later) | service-worker PWA is a real lift; revisit after the above |
-| Mobile widgets | SKIP | needs a native app; this is a web PWA |
-| Forecasting (assign future money) | SKIP | YNAB itself frames it as the risky cousin; against the "money you already have" ethos |
-| Public API | SKIP | it is our own app |
+| Mobile widgets / native app features | SKIP | Face/Touch ID, Siri, Spotlight, push, widgets all need a native app; this is a web PWA |
+| Forecasting (assign future money you don't have) | SKIP | distinct from future-month budgeting (PLANNED); against the "money you already have" ethos |
+| Public API / OAuth endpoints / webhooks | SKIP | it is our own app |
+
+### Productivity
+
+| YNAB feature | Status | Note |
+|---|---|---|
+| Carry balances between months | HAVE | v3 rollover |
+| Move money between categories | PARTIAL | see Core; quick-move UI is PLANNED |
+| Cover overspending from another category | PLANNED | see Core |
+| Bulk operations (multi-select) | PLANNED (light) | the bulk action bar |
+| Multi-select categories | PLANNED (light) | select categories for a bulk Auto Assign / target action |
+| Calculator in money fields | PLANNED (light) | the transaction calculator, applied to every amount input |
+| Drag & drop ordering | PLANNED | category reorder |
+| Undo / redo | PLANNED | undo the last assignment / edit; real value, medium lift (an action stack) |
+| Keyboard shortcuts / keyboard-only flow | PLANNED (light) | desktop only; assign, next category, add transaction |
+| Sticky sidebar / inspector, per-device layout | PARTIAL | desktop sidebar + inspector and the mobile 5-tab shell are in the visual spec; build with the shell |
+| Persistent settings | HAVE (light) | hide-amounts, active month, and view state live in localStorage |
+
+### Quality of life
+
+| YNAB feature | Status | Note |
+|---|---|---|
+| Desktop app mode (browser install / PWA) | PLANNED (light) | a `manifest.json` + icons; makes Add-to-Home / install work. No service worker yet (that's offline, SKIP later) |
+| Privacy-first, no advertising | HAVE | by nature |
+| Free trial / billing | SKIP | free two-person app |
+| Receipt storage / transaction photos | SKIP (later) | same as attachments above; needs Storage |
+| Auto payee cleanup / merchant renaming | SKIP | see Payees |
+
+### Excluded on purpose (bank + platform technicalities)
+
+Per the 2026-07-16 decision, every YNAB feature is in this plan **except** the two
+groups below. These are not "not yet" — they are out of scope by design.
+
+- **Bank connectivity.** Direct / automatic import, linked institutions, connector
+  switching, reset bank connection, pending-transaction matching, Apple Card /
+  Cash / Savings import. Plaid costs money and is most of the complexity in every
+  competitor. *File-based import (CSV / OFX / QFX / QIF) is the sanctioned
+  substitute and IS planned (Phase F).*
+- **Platform / infrastructure technicalities.** Native iOS/Android apps, tablet
+  apps, offline editing, widgets, Face ID / Touch ID, Siri Shortcuts, Spotlight,
+  push notifications; two-factor auth and encryption (Google OAuth + HTTPS +
+  RLS + Postgres backups already cover the real threat model, and column
+  encryption is a locked no); the public REST API, OAuth endpoints, and webhooks.
 
 ---
 
-## Build plan for the gaps (phased, 2026-07-16)
+## Roadmap v2: YNAB core, Monarch surfaces (2026-07-17)
 
-Ordered by value-per-effort and by dependency. Each phase is independently
-shippable. Effort is rough: S = an afternoon, M = a day or two, L = a week-ish.
+Replaces the lettered build plan (Phases A to J, 2026-07-16), which had become a
+YNAB gap list ordered by effort, with statuses drifting behind the code. This
+version is organized by pillar, folds in Monarch Money (full feature inventory
+in `monarch feature list.txt`), and starts from what actually shipped. The YNAB
+parity audit above stays as the reference inventory; this section owns status
+and order.
 
-**Phase A — cheap wins, no dependencies.** Each is a small isolated change; do
-them in any order between bigger work.
+### Decisions locked 2026-07-17 (Noah's calls)
 
-Note: the *shell itself* (tokens, the category table, and the four Available
-states) was already built in `styles.css` and is AA-verified. Measured 2026-07-16
-by compositing each tint over the white card: green 5.79, amber 4.89, red 5.32,
-gray 6.76, all past 4.5:1. So Phase A is just the cheap-win features below, not a
-restyle.
+1. **Envelope core stays.** The v3 zero-based engine plus the Phase B targets
+   engine is the only budget model. Monarch contributes surfaces on top of it,
+   never a second budgeting mode.
+2. **Monarch pillars in: Home dashboard, rules + recurring calendar.** Not
+   chosen: a separate goals engine (targets already carry that weight) and the
+   reports extras (sankey, merchant reports, monthly review recap). The shipped
+   Reflect reports stand.
+3. **Net worth via balance snapshots.** Manual accounts, balances typed in
+   monthly. Transactions stay one pot.
+4. **Cuts and keeps at discretion:** the full accounts subsystem and the
+   credit-card subsystem are cut; CSV/OFX file import and undo/redo stay; the
+   loan calculator is parked.
 
-- Category groups (S). **DONE 2026-07-16.** Label-based (`categories.group_name`,
-  schema-v4), grouped render with a per-group Available subtotal. `rollup()`
-  never sees a group.
-- Flags / color tags (S). **DONE 2026-07-16.** `transactions.flag` (schema-v4,
-  6-colour check), picker in the txn sheet, coloured dot on the row.
-  Filter-by-flag still to add.
-- Hide-amounts toggle (S). **DONE 2026-07-16.** Header eye toggle blurs every
-  `.num`/`.pill`, remembered in localStorage.
-- Payee autocomplete (S). **DONE 2026-07-16.** Distinct past descriptions feed a
-  datalist. No payees table.
-- Export to CSV (S). **DONE 2026-07-16.** Export button dumps the month on screen.
-- Auto-assign modes (M). **DONE 2026-07-16.** Fill empty to target, last month's
-  amounts, last month's spending, clear to zero. Average and underfunded deferred
-  (underfunded needs Phase B). All derive from existing data, no schema change.
+Unchanged and non-negotiable: no bank connections of any kind. From Monarch's
+list that also excludes receipts/OCR, all AI features, investments, credit
+score, bill split, forecasting, push notifications, and native apps.
 
-Phase A is complete. Next substantive work is Phase B (the targets engine).
+### Shipped ledger
 
-**Phase B — the targets engine.** The single highest-value gap. It is what
-turns `monthly_limit` from one flat number into YNAB's real goals, and it is the
-only thing that can express the yellow "underfunded" state v3 cannot.
+Where the old plan actually got to, compressed. Git log is the receipt.
 
-- `targets (category_id, kind, amount_cents, due_date, cadence, created_month)`.
-  Kinds: monthly refill-to, weekly, by-date savings, have-a-balance-of,
-  set-aside-another.
-- `rollup()` gains a per-category "needed this month" and a funded/underfunded
-  verdict, which drives the yellow state.
-- Auto-assign learns "fill to target".
-- Cost to Be Me (S, after the above): sum of the month's needed amounts, an
-  expected-income input, and a covered / short banner.
-- Ceiling to name in a `ponytail:` comment: by-date math assumes even monthly
-  contribution, not front-loading.
+- **v1 to v3 core:** auth, RLS, transactions, envelope model, Ready to Assign,
+  budget switcher, delete/rename budget.
+- **Phase A:** category groups (with collapse), flags, hide-amounts, payee
+  autocomplete datalist, CSV export, the auto-assign modes sheet.
+- **Phase B:** targets engine (monthly refill and by-date kinds as columns on
+  `categories`, schema-v5), per-category needed math, the underfunded yellow
+  (`envStatus` returns `under`; the pre-targets `close` state is gone),
+  fill-empty and fund-to-target auto-assign, Cost to Be Me.
+- **Phase C, part:** recurring cadences + auto-apply (schema-v6), Money Moves
+  log, bulk action bar. Splits and the transaction micro-features did not ship.
+- **Spruce & Bone:** the design-system redesign; current visual truth
+  (`styles.css` §1 tokens supersede the YNAB tokens in the visual spec below).
+- **Phase D:** spending breakdown, income vs expense, drill-through to the
+  register, report CSV export. Age of Money remains.
+- **Phase H, part:** the register search bar.
 
-**Phase C — richer transactions.**
+### Phase 1: envelope finishers — SHIPPED 2026-07-20 (`schema-v7.sql`)
 
-- Recurring transactions: **already shipped** (v2 `recurring` table, explicit
-  per-month "Add them"). Only enhancements remain (S to M): optional auto-apply
-  on month open, cadences beyond day-of-month (weekly, every-N-months), and
-  feeding a rule's next occurrence into Phase B's by-date "upcoming" targets.
-  Extend `recurring`; do not add a second `scheduled_transactions` table.
-- Split transactions (M). `parent_id` self-reference on `transactions`; the
-  parent nets to the split total, children carry the categories.
-- Bulk action bar (M). Multi-select, then categorize / flag / delete in one go.
-- Money Moves history (M). Append-only log of assignment changes; a read-only
-  trail per category.
+Closed the daily-use gaps in the YNAB core. Migration `schema-v7.sql` (parent_id,
+memo, target_snoozes) must run before the client deploys. Verified via `?selftest`
+(new `core.js` assertions) and `?preview`.
 
-**Phase D — reflect / reports.**
+- Quick-move + cover overspending (M). DONE. Tapping a category's Available pill
+  opens the move sheet; an overspent one prefills covering the shortfall from
+  Ready to Assign. A move is two assignment writes (minus source, plus dest); an
+  RTA endpoint writes nothing (it's derived). Reuses `assign()`, so each move
+  still lands in Money Moves.
+- Focused views (M). DONE. Filter chips over the plan — All / Underfunded /
+  Overspent / Has money / Overfunded / Snoozed, each with a live count — filtering
+  which categories render without touching the money. Active view is remembered in
+  localStorage (`budget.view`). ponytail: preset filters, not an arbitrary
+  saved-view builder; "remember the last one" is the persistence.
+- Auto-assign completion (S). DONE. Added 3-month average assigned, 3-month
+  average spent, reduce overfunding to target, reset available to assigned; every
+  mode (old and new) is now group-scopable via an "Apply to" picker in the sheet.
+- Snooze a target (S). DONE. Per-category per-month row in `target_snoozes`;
+  `envStatus` takes a `snoozed` flag that suppresses the amber, and the pill shows
+  a Zz + "Snoozed". Toggled from the move sheet; excluded from Cost to Be Me and
+  the fund-to-target auto-assign. There's a Snoozed focused view rather than a
+  separate screen.
+- Split transactions (M). DONE. `transactions.parent_id`: the parent is a
+  container (total, no category), children carry the categories and shares.
+  `splitParentIds` + a skip in `rollup`/`cashFlow`/`spendingBreakdown`/`ageOfMoney`
+  stop the parent double-counting; `distributeSplit` spreads the remainder over
+  blank rows. The register folds children into one parent line ("Split · N
+  categories"). `?selftest` covers all of it.
+- Transaction micro-features (S each). DONE. `memo` column (shown in the register
+  meta + CSV), `evalAmount` calculator in every money field (assign, move, txn
+  amount, split rows), duplicate a row, convert a row to a monthly recurring rule,
+  and add-now on a due rule.
+- Age of Money (S). DONE. `ageOfMoney` in `core.js` — FIFO income→expense, mean of
+  the last 10 expenses, null until there's banked income. Renders as a Reflect
+  card (days, not money, so it never blurs under hide-amounts).
 
-- Spending breakdown (M). Category totals for a month range, a simple bar or
-  donut. This is the one report that changes decisions.
-- Income vs Expense (S to M). A cash-flow table over a range.
-- Age of Money (M). Rolling average age of spent dollars from transaction
-  history. Niche, do last in this phase.
+### Phase 2: Home dashboard (Monarch)
 
-**Phase E — accounts subsystem (OPTIONAL, biggest architectural change).**
-Only start this if per-account tracking, reconciliation, or net worth is
-actually wanted. For a two-person joint pot it may never be. If it is:
+Monarch's landing screen, adapted. This is visual-spec Screen 6 finally built,
+and the Home tab stub in the Spruce & Bone shell finally filled.
 
-- `accounts (id, budget_id, name, type, on_budget)` + `transactions.account_id`.
-- `transactions.cleared` and a Working Balance per account.
-- Reconcile flow (enter bank balance, write an adjustment, lock prior rows).
-- Transfers between accounts (one movement, two register lines).
-- Tracking accounts (`on_budget = false`) unlock a Net Worth report.
-- Credit-card handling last and separately (L): the auto payment category, the
-  float, paid-in-full, and the credit-overspend yellow. This is genuinely the
-  hard part of YNAB; do not start it casually.
+- Home tab as first screen (M). Phone-first card stack: plan state (Ready to
+  Assign plus overspent-category count, tap through to the plan), spending
+  summary (this month vs last), upcoming recurring (next 7 days), recent
+  transactions.
+- Alerts row (S). "Money to assign", "overspending to cover", each a tappable
+  card in its state color.
+- Widget controls (S). Hide and reorder cards, stored per device in
+  localStorage. ponytail: a settings list, not a drag-and-drop grid builder.
+- The net worth card slots in when Phase 4 ships.
 
-**Phase F — standalone tools and lifecycle.** No dependency on the others.
+### Phase 3: rules + recurring calendar (Monarch)
 
-- File-based CSV / OFX import (M). Drag-drop, map columns, dedupe against
-  existing rows by date + amount + description. The sanctioned alternative to
-  the skipped Plaid import.
-- Loan / debt calculator (M). Pure client math, no schema. Principal, APR, and
-  payment in; payoff date and interest-saved-per-extra-dollar out.
-- Fresh Start / Plan Reset (M). Archive the current plan, carry categories,
-  targets, scheduled transactions, and payees into a clean one.
-- Focused views (S). Show/hide columns, remember collapsed groups.
+Kills most manual categorization, which is the main daily friction left.
 
-### Recommended order
+- Rules engine (M). A `rules` table: description substring match sets category
+  and optionally a flag. Priority is list order, first match wins. Applied as
+  pre-fill on manual entry.
+- Retro-apply with preview (S). Run the rules over existing uncategorized rows,
+  show the would-be changes, commit on confirm.
+- Payee-memory fallback (S). No matching rule: pre-fill the last category used
+  for that description. The old Phase J idea, folded in here.
+- Recurring calendar (M). Month view of recurring rules with paid/pending state
+  (paid = the rule's transaction exists this month), tap to add-now. Feeds the
+  dashboard's upcoming card.
+- When Phase 5 lands, imported rows run through the same rules.
 
-Phase A (quick momentum) then B (targets, the real substance) then C, then D.
-E and F are opt-in and can slot in whenever a specific need shows up. Everything
-still honors the locked decisions: static files, no build step, `kind` column
-never signed amounts, integer cents, RLS as the only gate, no Plaid.
+### Phase 4: net worth lite (Monarch, snapshots only)
+
+- Schema (M). `accounts (id, budget_id, name, kind asset|liability, sort,
+  archived)` and `balance_snapshots (account_id, month, balance_cents)`. Same
+  member-RLS pattern as every other table.
+- Balances screen (S). Type in current balances; a staleness chip when the
+  month has no entry yet.
+- Net worth view (M). Assets minus liabilities over time, per-account
+  breakdown, range picker, plus the dashboard card.
+- Hard boundary, restating the decision: transactions never reference accounts.
+  No cleared state, no reconcile, no transfers, no credit-card handling.
+  Reopening that is a new decision, not a phase.
+
+### Phase 5: file import
+
+- CSV/OFX import (M). Drag-drop a bank export, map columns, dedupe against
+  existing rows on date + amount + description, preview before commit. Phase 3
+  rules categorize incoming rows. The sanctioned substitute for bank sync.
+
+### Phase 6: category + plan management
+
+Old Phase G plus the lifecycle bits of F. Cheap, isolated, slot between phases.
+
+- Reorder categories (M). `sort_order`; drag on desktop, up/down on phone.
+- Category notes, emoji icon, color (S each).
+- Hide, archive, merge a category (S each). Merge moves history then archives
+  the source; the Monarch nicety the audit lacked.
+- Future-month assigning (M). Assign in a month ahead and roll it forward.
+  Still not forecasting.
+- Copy budget (S), archive budget (S), Fresh Start (M).
+
+### Phase 7: productivity + QoL
+
+Old Phase I. Opportunistic.
+
+- Undo/redo (M). Action stack over assignment and transaction edits.
+- Keyboard shortcuts (S). Desktop: assign, next category, new transaction.
+- PWA manifest + icons (S). Installable; still no service worker.
+- First-run envelope explainer (S). The model is where people bounce off.
+
+### Parked (unscheduled, revisit on real demand)
+
+- Loan/debt calculator. Self-contained client math; build it the day a real
+  loan needs planning.
+- Real payees table (rename / merge / hide), only if datalist + rules prove
+  too loose.
+- Richer target kinds (weekly, set-aside-another, have-a-balance-of,
+  pay-specific-amount). Monthly refill + by-date cover real use so far.
+- Realtime sync channel, only if simultaneous editing actually happens.
+- Offline / service worker.
+
+### Cut (2026-07-17, do not resurrect casually)
+
+- Full accounts subsystem: per-transaction accounts, cleared/uncleared,
+  reconcile, transfers. Balance snapshots cover the need at this scale.
+- Credit-card subsystem: payment category, float, credit overspend. It rode
+  entirely on full accounts.
+- Goals engine and the reports extras (sankey, merchant reports, monthly
+  review recap): offered 2026-07-17, not chosen.
+- Monarch's bank-adjacent and platform features: sync/aggregators, receipts
+  and OCR, AI everything, investments, credit score, bill split, forecasting,
+  notifications, native apps.
+
+### Order
+
+Phase 1, then 2, then 3, then 4: finish the core, then the visible Monarch
+win, then automation, then net worth. Phase 5 when the first real bank export
+shows up. Phases 6 and 7 are unblocked fillers for whenever momentum is
+wanted. Everything honors the locked decisions: static files, no build step,
+`kind` column never signed amounts, integer cents, RLS as the only gate, no
+Plaid.
 
 ---
 
 ## Visual and layout spec — YNAB parity (2026-07-16)
+
+(The exact tokens below are superseded by the Spruce & Bone redesign;
+`styles.css` §1 is the live token source. The layouts, screens, and the four
+Available-state semantics still govern.)
 
 Goal: the app should read as YNAB at a glance. This section is the design system
 and a screen-by-screen layout so any build phase renders into a settled look
@@ -703,6 +935,10 @@ needs attention (red or yellow) and as a **plain colored number** when it does n
 Hard rule (project): every one of these must be **measured** at AA 4.5:1, not
 eyeballed. Translucency in the glass chrome eats contrast; numbers never sit on
 glass. The values above are starting points, contrast-check before shipping.
+
+**Superseded 2026-07-16: Phase B shipped.** Yellow now carries the YNAB meaning
+(underfunded); `envStatus` returns `under` and the pre-targets `close` state is
+gone. Historical paragraph kept for context:
 
 **Current vs target semantics (important).** The yellow row above is the *Phase B*
 meaning, matching YNAB ("underfunded"). The code today does not mean that. Until
@@ -884,28 +1120,25 @@ This spec is not a phase, it is the surface every phase renders into. Phase A
 should stand up the shell (tabs, sidebar, header, tokens, the category table, and
 the four Available states) so later phases have a settled frame to build in.
 
-**Phase gating of these screens (do not build out of order).** The Plan screen,
-the Inspector, and the Add/edit transaction sheet render on today's data model.
-The Spending register (Payee, Category, Memo, Outflow/Inflow, **Cleared**, running
-balance), the Accounts tab, every cleared/reconciled state, and the Net Worth
-report all depend on the **Phase E accounts subsystem**, which is the open "commit
-or drop" decision below. They cannot exist until that fork is resolved, so treat
-those screens as blocked, not ready. On today's single-pot model the "Spending"
-list is just the flat transaction list this app already renders, without the
-account-scoped columns.
+**Phase gating of these screens (resolved 2026-07-17).** The Plan screen, the
+Inspector, and the Add/edit transaction sheet render on today's data model. The
+account-scoped parts (per-account registers, the Cleared/Reconciled states and
+chips, running balances, transfers, the tracking-accounts Net Worth report)
+depended on the full accounts subsystem, which Roadmap v2 cut. They are out for
+good, not blocked. The "Spending" list stays the flat transaction list this app
+already renders, and net worth arrives instead as the snapshot chart (Roadmap
+v2, Phase 4).
 
 ---
 
 ## Open decisions
 
 - Policies for `budgets`, `budget_members`, `categories` still to write.
-- **Accounts subsystem (Phase E): commit or drop?** It is the fork in the road.
-  Everything through Phase D treats the budget as one pot. Reconcile, net worth,
-  transfers, and real credit-card handling all hang off an accounts table that
-  does not exist yet. Decide before Phase C so transactions are not reshaped
-  twice.
-- Recurring transactions **already shipped** (v2 `recurring` table); only
-  enhancements remain (Phase C). Reports are still unbuilt (Phase D).
+- ~~Accounts subsystem (Phase E): commit or drop?~~ **Resolved 2026-07-17:**
+  balance snapshots only (Roadmap v2, Phase 4). The full subsystem, and the
+  credit-card handling that rode on it, are cut.
+- Recurring shipped in v2; its enhancements (cadences, auto-apply) shipped with
+  Phase C. Reports shipped in Phase D except Age of Money (Roadmap v2, Phase 1).
 
 ### Known code discrepancies found in review (2026-07-16)
 
@@ -929,7 +1162,8 @@ independently of the phases.
   month boundaries use local `new Date()`. Fine for two Canadians in one timezone,
   but both are undocumented assumptions, not settings. Note before assuming
   otherwise.
-- **Assign input coerces junk to zero.** The category assign handler uses
-  `Number(value) || 0`, so a non-numeric entry silently empties the envelope
-  rather than being rejected. Violates "validate at boundaries". Validate before
-  writing.
+- **Assign input coerces junk to zero** (RESOLVED 2026-07-20, Phase 1). The assign
+  handler now runs the value through `evalAmount` (the calculator): a non-numeric
+  entry is rejected and the field is put back to the current assigned amount rather
+  than silently emptying the envelope. A bare number or a little sum ("40+5") both
+  work. Same validation guards the move sheet and the transaction amount field.
