@@ -2,7 +2,8 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
   prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, txnMatches, rollup, recurringOccurrences,
-  splitParentIds, distributeSplit, evalAmount, ageOfMoney
+  splitParentIds, distributeSplit, evalAmount, ageOfMoney,
+  matchRule, lastCategoryFor, retroApply
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -16,7 +17,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], rules: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null }
 const $ = id => document.getElementById(id)
 
 // One rollup for the whole app, snooze-aware. Every screen and action reads the
@@ -35,9 +36,9 @@ async function loadBudgets() {
 }
 
 async function loadMonth() {
-  if (!state.budgetId) { state.cats = []; state.txns = []; state.history = []; state.assigns = []; state.recurring = []; state.snoozed = new Set(); return }
+  if (!state.budgetId) { state.cats = []; state.txns = []; state.history = []; state.assigns = []; state.recurring = []; state.rules = []; state.snoozed = new Set(); return }
   const ms = monthStart(state.month)
-  const [c, t, r, a, sn] = await Promise.all([
+  const [c, t, r, a, sn, ru] = await Promise.all([
     sb.from('categories').select('*').eq('budget_id', state.budgetId).order('sort').order('name'),
     // Everything up to the end of this month, not just this month: last year's
     // leftovers are part of this month's Available.
@@ -55,19 +56,23 @@ async function loadMonth() {
     sb.from('assignments').select('category_id,month,amount').eq('budget_id', state.budgetId)
       .lte('month', ms),
     // Only this month's snoozes matter — a snooze is per category per month.
-    sb.from('target_snoozes').select('category_id').eq('budget_id', state.budgetId).eq('month', ms)
+    sb.from('target_snoozes').select('category_id').eq('budget_id', state.budgetId).eq('month', ms),
+    // Categorization rules, in priority order (first match wins in matchRule).
+    sb.from('rules').select('*').eq('budget_id', state.budgetId).order('sort').order('created_at')
   ])
   if (c.error) return fail(c.error)
   if (t.error) return fail(t.error)
   if (r.error) return fail(r.error)
   if (a.error) return fail(a.error)
   if (sn.error) return fail(sn.error)
+  if (ru.error) return fail(ru.error)
   state.cats = c.data ?? []
   state.history = t.data ?? []
   state.txns = state.history.filter(x => x.occurred_on >= ms)
   state.recurring = r.data ?? []
   state.assigns = a.data ?? []
   state.snoozed = new Set((sn.data ?? []).map(s => s.category_id))
+  state.rules = ru.data ?? []
 }
 
 // Rule occurrences due in the month on screen that have no transaction yet, as
@@ -750,6 +755,50 @@ $('menu-dialog').onclick = e => {
   if (e.target === e.currentTarget || e.target.closest('.menu-item')) $('menu-dialog').close()
 }
 
+// ---- changelog: a static, user-facing list of what shipped, newest first.
+// ponytail: a hardcoded array, not a table or a fetched file — it only changes
+// when we ship, which is when this file changes anyway. Add a "new since you last
+// looked" dot (localStorage last-seen date) if discoverability ever needs it.
+const CHANGELOG = [
+  ['2026-07-20', 'Rules & recurring calendar', [
+    'Rules auto-fill a category (and flag) from what a transaction’s description contains.',
+    'Payee memory: a new transaction reuses the last category you gave that payee.',
+    'A month calendar of recurring bills — see what’s added, tap a day to add what’s due.'
+  ]],
+  ['2026-07-20', 'Home dashboard', [
+    'A new Home tab: money to assign, overspending, this month vs last, upcoming bills and recent activity.',
+    'Show, hide and reorder the cards from Customize.'
+  ]],
+  ['2026-07-20', 'Envelope finishers', [
+    'Split one transaction across several categories.',
+    'Tap an Available amount to move money or cover overspending.',
+    'Filter the plan, snooze a target for the month, and track your Age of Money.',
+    'Type quick math like “12.50/2” in any amount field.'
+  ]],
+  ['2026-07-17', 'Reports & search', [
+    'The Reflect tab: spending breakdown and income vs expense.',
+    'Search the transactions register.'
+  ]],
+  ['2026-07-16', 'A fresh look', [
+    'The new five-tab layout and design.',
+    'Category targets, recurring rules, a Money Moves history and bulk editing.'
+  ]],
+  ['2026-07-15', 'Hello, budget', [
+    'Shared envelope budgeting for two, with Google sign-in.'
+  ]]
+]
+
+function renderChangelog() {
+  $('changelog-list').innerHTML = CHANGELOG.map(([date, title, items]) => `
+    <div class="cl-entry">
+      <div class="cl-head"><span class="cl-title">${esc(title)}</span><span class="small muted">${esc(date)}</span></div>
+      <ul class="cl-items">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+    </div>`).join('')
+}
+$('show-changelog').onclick = () => { renderChangelog(); $('changelog-dialog').showModal() }
+$('changelog-done').onclick = () => $('changelog-dialog').close()
+$('changelog-dialog').onclick = e => { if (e.target === $('changelog-dialog')) $('changelog-dialog').close() }  // backdrop tap
+
 // Budget picker: the switcher button opens a sheet listing every budget (active
 // one checked) plus a New-budget row. Replaces the native <select> dropdown.
 function renderBudgetList() {
@@ -1222,6 +1271,24 @@ $('split-list').onclick = e => {
 // changes. Also runs the calculator so "5+3" resolves in place.
 $('t-amount').onchange = e => { const v = evalAmount(e.target.value); if (v != null) e.target.value = v; if (state.splitRows) renderSplits() }
 
+// Phase 3 pre-fill: when the description (payee) changes, a matching rule sets the
+// category and flag; with no rule, payee memory fills the category from the last
+// time this exact payee was used. Only fills BLANKS — never stomps a pick the user
+// already made, and splits manage their own categories. Fires on blur / datalist
+// pick (change), so typing mid-word doesn't thrash the select.
+$('t-desc').onchange = () => {
+  if (state.splitRows) return
+  const desc = $('t-desc').value
+  const r = matchRule(desc, state.rules)
+  if (r) {
+    if (r.category_id && !$('t-cat').value) $('t-cat').value = r.category_id
+    if (r.flag && !$('t-flag').value) $('t-flag').value = r.flag
+    return
+  }
+  const last = lastCategoryFor(desc, state.history)
+  if (last && !$('t-cat').value) $('t-cat').value = last
+}
+
 // Duplicate: reopen the current field values as a fresh draft dated today. Reads
 // the form (so in-progress edits carry), and drops split mode — a plain copy.
 $('txn-duplicate').onclick = () => {
@@ -1422,6 +1489,162 @@ $('apply-rec').onclick = async () => {
   refresh()
 }
 
+// ---------------------------------------------------------------- rules (Phase 3)
+
+const catNameOf = id => state.cats.find(c => c.id === id)?.name ?? ''
+let retroChanges = []   // the pending retro-apply change set, between preview and commit
+
+$('manage-rules').onclick = () => {
+  $('rule-cat').innerHTML = catOptions(null)
+  $('rules-preview').hidden = true
+  $('rules-main').hidden = false
+  renderRules()
+  $('rules-dialog').showModal()
+}
+$('rules-done').onclick = () => { $('rules-dialog').close(); refresh() }
+
+function renderRules() {
+  $('rules-list').innerHTML = state.rules.length ? state.rules.map((r, i) => `
+    <div class="rec-edit">
+      <div class="body">
+        <div class="desc">&ldquo;${esc(r.match)}&rdquo;</div>
+        <div class="small muted">${r.category_id ? esc(catNameOf(r.category_id)) : 'flag only'}${r.flag ? ` &middot; <span class="flag-dot" style="background:var(--flag-${r.flag})"></span> ${esc(r.flag)}` : ''}</div>
+      </div>
+      <span class="rule-move">
+        <button class="btn-quiet" data-ruleup="${r.id}"${i === 0 ? ' disabled' : ''} aria-label="Raise priority">&uarr;</button>
+        <button class="btn-quiet" data-ruledown="${r.id}"${i === state.rules.length - 1 ? ' disabled' : ''} aria-label="Lower priority">&darr;</button>
+      </span>
+      <button class="row-del" data-delrule="${r.id}" aria-label="Delete rule">&times;</button>
+    </div>`).join('') : '<div class="empty">No rules yet. Add one above.</div>'
+}
+
+$('rules-add').onsubmit = async e => {
+  e.preventDefault()
+  if (!state.budgetId) return
+  const match = $('r-match').value.trim()
+  if (!match) return
+  // New rules go to the bottom (lowest priority): max sort + 1.
+  const sort = state.rules.length ? Math.max(...state.rules.map(r => r.sort ?? 0)) + 1 : 0
+  const { error } = await sb.from('rules').insert({
+    budget_id: state.budgetId, match,
+    category_id: $('rule-cat').value || null, flag: $('rule-flag').value || null, sort
+  })
+  if (error) return fail(error)
+  $('r-match').value = ''; $('rule-flag').value = ''
+  await loadMonth(); renderRules()
+}
+
+$('rules-list').onclick = async e => {
+  const up = e.target.closest('[data-ruleup]'), down = e.target.closest('[data-ruledown]')
+  if (up || down) {
+    const id = (up || down).dataset[up ? 'ruleup' : 'ruledown']
+    const i = state.rules.findIndex(r => r.id === id), j = i + (up ? -1 : 1)
+    if (j < 0 || j >= state.rules.length) return
+    const arr = [...state.rules]
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+    // Re-pack sort to array index so priority is always distinct + contiguous
+    // (older rows may share sort=0). ponytail: rewrite the whole small list, not
+    // a minimal swap — a budget has a handful of rules.
+    await Promise.all(arr.map((r, k) => r.sort === k ? null : sb.from('rules').update({ sort: k }).eq('id', r.id)).filter(Boolean))
+    await loadMonth(); renderRules()
+    return
+  }
+  const del = e.target.closest('[data-delrule]')
+  if (!del) return
+  if (!confirm('Delete this rule? Transactions it already set stay as they are.')) return
+  const { error } = await sb.from('rules').delete().eq('id', del.dataset.delrule)
+  if (error) return fail(error)
+  await loadMonth(); renderRules()
+}
+
+// Retro-apply: preview the changes, commit on confirm. The preview panel swaps in
+// over the add-form + list so the whole flow lives in one dialog.
+$('rules-retro').onclick = () => {
+  if (!state.rules.length) { alert('Add a rule first.'); return }
+  retroChanges = retroApply(state.history, state.rules)
+  $('rules-preview-list').innerHTML = retroChanges.length
+    ? retroChanges.map(ch => `<div class="rec-edit"><div class="body">
+        <div class="desc">${esc(ch.description) || '<span class="muted">No description</span>'}</div>
+        <div class="small muted">&rarr; ${esc(catNameOf(ch.category_id))}${ch.flag ? ` &middot; <span class="flag-dot" style="background:var(--flag-${ch.flag})"></span> ${esc(ch.flag)}` : ''}</div>
+      </div></div>`).join('')
+    : '<div class="empty">No uncategorized transactions match a rule.</div>'
+  $('rules-preview-count').textContent = retroChanges.length
+    ? `${retroChanges.length} transaction${retroChanges.length === 1 ? '' : 's'} will be categorized.`
+    : ''
+  $('rules-commit').hidden = !retroChanges.length
+  $('rules-main').hidden = true
+  $('rules-preview').hidden = false
+}
+$('rules-preview-back').onclick = () => { $('rules-preview').hidden = true; $('rules-main').hidden = false }
+$('rules-commit').onclick = async () => {
+  if (!retroChanges.length) return
+  // One update per row; the set is preview-bounded, so a loop is fine (ponytail:
+  // a bulk RPC would be premature for an occasional, handful-of-rows action).
+  for (const ch of retroChanges) {
+    const { error } = await sb.from('transactions').update({ category_id: ch.category_id, flag: ch.flag }).eq('id', ch.id)
+    if (error) return fail(error)
+  }
+  const n = retroChanges.length
+  retroChanges = []
+  $('rules-preview').hidden = true; $('rules-main').hidden = false
+  await loadMonth(); renderRules(); render()
+  alert(`Categorized ${n} transaction${n === 1 ? '' : 's'}.`)
+}
+
+// ---------------------------------------------------------------- recurring calendar (Phase 3)
+
+const WEEKDAY_ABBR = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+$('manage-cal').onclick = () => { renderCalendar(); $('cal-dialog').showModal() }
+$('cal-done').onclick = () => { $('cal-dialog').close(); refresh() }
+
+// Month grid of recurring occurrences with paid/pending state. paid = a txn for
+// that rule+date already exists this month; pending days are tappable to add-now.
+function renderCalendar() {
+  const ms = monthStart(state.month)
+  const [y, m] = ms.split('-').map(Number)   // m is 1-12
+  $('cal-sub').textContent = monthLabel(state.month)
+  const paidSet = new Set(state.txns.filter(t => t.recurring_id).map(t => `${t.recurring_id}|${t.occurred_on}`))
+  const byDay = new Map()
+  for (const r of state.recurring) {
+    if (r.active === false) continue
+    for (const date of recurringOccurrences(r, ms)) {
+      const day = Number(date.slice(8, 10))
+      if (!byDay.has(day)) byDay.set(day, [])
+      byDay.get(day).push({ paid: paidSet.has(`${r.id}|${date}`) })
+    }
+  }
+  const firstDow = new Date(y, m - 1, 1).getDay()
+  const days = new Date(y, m, 0).getDate()
+  let cells = WEEKDAY_ABBR.map(d => `<div class="cal-dow">${d}</div>`).join('')
+  for (let i = 0; i < firstDow; i++) cells += '<div class="cal-cell is-empty"></div>'
+  for (let d = 1; d <= days; d++) {
+    const occ = byDay.get(d) || []
+    const pending = occ.filter(o => !o.paid).length
+    const cls = occ.length ? (pending ? 'has pending' : 'has paid') : ''
+    cells += `<button class="cal-cell ${cls}"${pending ? ` data-calday="${d}"` : ' disabled'} aria-label="Day ${d}${occ.length ? `, ${occ.length} recurring${pending ? `, ${pending} to add` : ' (added)'}` : ''}">
+      <span class="cal-n">${d}</span>
+      ${occ.length ? `<span class="cal-dots">${occ.map(o => `<i class="cal-dot ${o.paid ? 'paid' : 'pending'}"></i>`).join('')}</span>` : ''}
+    </button>`
+  }
+  $('cal-grid').innerHTML = cells
+  const totalPending = [...byDay.values()].flat().filter(o => !o.paid).length
+  $('cal-foot').textContent = totalPending
+    ? `${totalPending} recurring ${totalPending === 1 ? 'item' : 'items'} still to add. Tap a highlighted day to add it.`
+    : state.recurring.length ? 'Everything recurring is added for this month.' : 'No recurring rules yet.'
+}
+
+$('cal-grid').onclick = async e => {
+  const b = e.target.closest('[data-calday]')
+  if (!b) return
+  const ms = monthStart(state.month)
+  const dateStr = `${ms.slice(0, 8)}${String(b.dataset.calday).padStart(2, '0')}`
+  const rows = recurringRows(pendingRecurring().filter(p => p.date === dateStr))
+  if (!rows.length) return
+  const { error } = await sb.from('transactions').upsert(rows, { onConflict: 'recurring_id,occurred_on', ignoreDuplicates: true })
+  if (error) return fail(error)
+  await loadMonth(); renderCalendar(); render()
+}
+
 // ---------------------------------------------------------------- money moves
 
 // The assignment trail, loaded lazily when opened rather than on every month load
@@ -1539,13 +1762,19 @@ function previewSeed() {
     // A split: parent (no category) + two children carrying the categories.
     { id: 'pv-t7', category_id: null,      kind: 'expense', amount: 60,    description: 'Pharmacy + snacks', occurred_on: d(12) },
     { id: 'pv-t7a', parent_id: 'pv-t7', category_id: 'pv-groc', kind: 'expense', amount: 38, description: 'Pharmacy + snacks', occurred_on: d(12) },
-    { id: 'pv-t7b', parent_id: 'pv-t7', category_id: 'pv-fun',  kind: 'expense', amount: 22, description: 'Pharmacy + snacks', occurred_on: d(12) }
+    { id: 'pv-t7b', parent_id: 'pv-t7', category_id: 'pv-fun',  kind: 'expense', amount: 22, description: 'Pharmacy + snacks', occurred_on: d(12) },
+    // An uncategorized expense a rule ("amazon") will catch on retro-apply.
+    { id: 'pv-t8', category_id: null,   kind: 'expense', amount: 24.99, description: 'Amazon order',   occurred_on: d(14) }
   ].sort((a, b) => b.occurred_on.localeCompare(a.occurred_on))
   state.txns = state.history.filter(t => t.occurred_on >= ms)
   state.recurring = [{ id: 'pv-r1', description: 'Rent', amount: 1800, kind: 'expense', cadence: 'monthly',
                        day_of_month: 1, category_id: 'pv-rent', active: true, auto_apply: false },
                      { id: 'pv-r2', description: 'Internet', amount: 65, kind: 'expense', cadence: 'monthly',
                        day_of_month: 20, category_id: 'pv-hyd', active: true, auto_apply: false }]
+  state.rules = [
+    { id: 'pv-rule1', match: 'metro',  category_id: 'pv-groc', flag: 'green', sort: 0 },
+    { id: 'pv-rule2', match: 'amazon', category_id: 'pv-fun',  flag: null,    sort: 1 }
+  ]
   $('login').hidden = true
   $('app').hidden = false
   $('add-btn').hidden = false

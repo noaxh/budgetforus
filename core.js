@@ -66,6 +66,53 @@ export function recurringOccurrences(rule, ms) {
   }
 }
 
+// ---------------------------------------------------------------- rules (Phase 3)
+
+// The first rule whose `match` text is a (case-insensitive) substring of the
+// description wins. `rules` is in priority order (the caller sorts by `sort`),
+// so "first match wins" is just the first hit. Returns the rule or null. Blank
+// match or blank description never matches. Pure + selftested.
+export function matchRule(description, rules) {
+  const d = (description || '').toLowerCase()
+  if (!d) return null
+  for (const r of rules || []) {
+    const m = (r.match || '').toLowerCase().trim()
+    if (m && d.includes(m)) return r
+  }
+  return null
+}
+
+// Payee memory: the category_id most recently used for an EXACT (case-insensitive)
+// description, or null. The pre-fill fallback when no rule matches — we already
+// hold the history, so no payees table. `history` is newest-first (loadMonth orders
+// occurred_on desc), so the first exact match is the most recent. Split parents
+// carry no category, so they're skipped. Pure + selftested.
+export function lastCategoryFor(description, history) {
+  const d = (description || '').trim().toLowerCase()
+  if (!d) return null
+  for (const t of history || []) {
+    if (t.parent_id) continue
+    if (t.category_id && (t.description || '').trim().toLowerCase() === d) return t.category_id
+  }
+  return null
+}
+
+// Retro-apply: the change set from running `rules` over every uncategorized,
+// non-parent EXPENSE in `txns`. Each change is {id, description, category_id,
+// flag} — the preview renders it and the commit writes it. A matched flag only
+// fills a blank one (never stomps a flag the user set). Rows a rule leaves without
+// a category (flag-only rule) are dropped, since retro-apply is about categorizing.
+// Pure + selftested.
+export function retroApply(txns, rules) {
+  const out = []
+  for (const t of txns || []) {
+    if (t.parent_id || t.category_id || t.kind !== 'expense') continue
+    const r = matchRule(t.description, rules)
+    if (r && r.category_id) out.push({ id: t.id, description: t.description, category_id: r.category_id, flag: r.flag || t.flag || null })
+  }
+  return out
+}
+
 // A category's expenses within [from, to] inclusive, in cents. The date window is
 // the only thing here that can be quietly wrong, so it carries a selftest.
 export const sumSpentInRange = (history, id, from, to) =>
@@ -371,6 +418,38 @@ if (location.search.includes('selftest')) {
   eq(occ({ cadence: 'every_n', interval_months: 3, day_of_month: 1, created_at: '2026-07-10' }, '2026-08-01'), '', 'every_n skips a between month')
   eq(occ({ cadence: 'every_n', interval_months: 3, day_of_month: 1, created_at: '2026-07-10' }, '2026-10-01'), '2026-10-01', 'every_n fires again one interval on')
   eq(occ({ cadence: 'every_n', interval_months: 2, day_of_month: 1, created_at: '2026-07-10' }, '2026-06-01'), '', 'every_n never fires before it was created')
+
+  // Rules: case-insensitive substring, first (highest-priority) match wins.
+  const RULES = [{ match: 'Amazon Prime', category_id: 'sub' }, { match: 'amazon', category_id: 'shop', flag: 'blue' }, { match: 'metro', category_id: 'grocery' }]
+  eq(matchRule('AMAZON PRIME renewal', RULES)?.category_id, 'sub', 'more specific rule wins when it is listed first')
+  eq(matchRule('amazon.ca order', RULES)?.category_id, 'shop', 'substring match, case-insensitive')
+  eq(matchRule('Metro groceries', RULES)?.flag, undefined, 'matched rule with no flag has no flag')
+  eq(matchRule('paycheque', RULES), null, 'no rule matches')
+  eq(matchRule('', RULES), null, 'blank description matches nothing')
+  eq(matchRule('anything', [{ match: '', category_id: 'x' }]), null, 'a blank match never matches')
+  // Payee memory: most-recent exact-description category; history is newest-first.
+  const HIST = [
+    { description: 'Metro', category_id: 'g2', occurred_on: '2026-07-10' },
+    { description: 'metro', category_id: 'g1', occurred_on: '2026-06-10' },
+    { description: 'Split total', category_id: null, parent_id: undefined, occurred_on: '2026-07-01' }
+  ]
+  eq(lastCategoryFor('METRO', HIST), 'g2', 'payee memory returns the most recent exact match, case-insensitive')
+  eq(lastCategoryFor('Unknown', HIST), null, 'payee memory: nothing for an unseen payee')
+  eq(lastCategoryFor('Metro', [{ description: 'Metro', category_id: null }]), null, 'payee memory skips uncategorized rows')
+  // Retro-apply: only uncategorized non-parent expenses, mapped through the rules.
+  const RTX = [
+    { id: 't1', description: 'Amazon order', category_id: null, kind: 'expense' },
+    { id: 't2', description: 'Amazon order', category_id: 'already', kind: 'expense' },
+    { id: 't3', description: 'Metro', category_id: null, kind: 'expense', flag: 'red' },
+    { id: 't4', description: 'Paycheque', category_id: null, kind: 'income' },
+    { id: 't5', description: 'Amazon', category_id: null, kind: 'expense', parent_id: 'p' }
+  ]
+  const ra = retroApply(RTX, RULES)
+  eq(ra.length, 2, 'retro-apply hits only uncategorized non-parent expenses that match a rule')
+  eq(ra[0].id, 't1', 'first change is the uncategorized Amazon row')
+  eq(ra[0].flag, 'blue', 'rule flag fills a blank flag')
+  eq(ra[1].flag, 'red', 'an existing flag is kept, not stomped')
+
   const SP = [
     { category_id: 'g', kind: 'expense', amount: 10, occurred_on: '2026-06-15' },
     { category_id: 'g', kind: 'expense', amount: 5,  occurred_on: '2026-07-02' },

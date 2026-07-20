@@ -864,6 +864,43 @@ dialog[open]::backdrop {
 .rec-auto input { width: 20px; height: 20px; flex: none; accent-color: var(--brand); }
 .move-up   { color: var(--ok-fg); }
 .move-down { color: var(--under-fg); }
+
+/* ---- rules + calendar (Phase 3) --------------------------------------------
+   Rule rows reuse .rec-edit; the flag dot inline sits in the .small line. The
+   reorder buttons mirror the Home-customize move controls. */
+.rule-move { display: flex; gap: var(--s1); flex: none; }
+.rule-move .btn-quiet { min-width: 40px; min-height: 40px; padding: 0; }
+.rule-move .btn-quiet:disabled { opacity: 0.35; }
+.rec-edit .flag-dot { display: inline-block; width: 9px; height: 9px; vertical-align: baseline; }
+
+/* Recurring calendar: a 7-column month grid. Days with occurrences get a tinted
+   fill and a dot per bill — green added, amber still due; only days with a
+   pending bill are tappable (the rest are disabled). */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-dow { text-align: center; font-size: var(--fs-micro); font-weight: 700; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 4px; }
+.cal-cell {
+  aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 3px; padding: 5px 2px 3px; border-radius: var(--r-ctl); background: var(--paper);
+  font-size: var(--fs-meta); color: var(--ink);
+}
+.cal-cell.is-empty { background: none; }
+.cal-cell:disabled { cursor: default; }
+.cal-cell.has { font-weight: 700; }
+.cal-cell.pending { background: var(--under-pill); color: var(--under-fg); }
+.cal-cell.paid    { background: var(--ok-tint);   color: var(--ok-fg); }
+.cal-cell.pending:active { transform: scale(0.94); }
+.cal-n { line-height: 1; }
+.cal-dots { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
+.cal-dot { width: 5px; height: 5px; border-radius: 50%; }
+.cal-dot.paid    { background: var(--ok-fg); }
+.cal-dot.pending { background: var(--over-pill); }
+
+/* ---- changelog (What's new) — a plain dated list of shipped updates. */
+.cl-entry + .cl-entry { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--hairline); }
+.cl-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s2); }
+.cl-title { font-weight: 800; font-size: var(--fs-section); color: var(--ink); }
+.cl-items { margin: 0; padding-left: 1.1em; }
+.cl-items li { font-size: var(--fs-meta); color: var(--ink-2); margin-top: 4px; }
 .aa-modes { display: flex; flex-direction: column; gap: var(--s2); }
 .aa-modes .btn-quiet { display: block; width: 100%; text-align: left; }
 .danger-zone { margin-top: var(--s8); text-align: center; }
