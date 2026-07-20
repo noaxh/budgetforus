@@ -3,7 +3,8 @@ import {
   cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
   prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, txnMatches, rollup, recurringOccurrences,
   splitParentIds, distributeSplit, evalAmount, ageOfMoney,
-  matchRule, lastCategoryFor, retroApply
+  matchRule, lastCategoryFor, retroApply,
+  netWorthAt, netWorthSeries
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -17,7 +18,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], rules: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], rules: [], accounts: [], snapshots: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null }
 const $ = id => document.getElementById(id)
 
 // One rollup for the whole app, snooze-aware. Every screen and action reads the
@@ -36,9 +37,9 @@ async function loadBudgets() {
 }
 
 async function loadMonth() {
-  if (!state.budgetId) { state.cats = []; state.txns = []; state.history = []; state.assigns = []; state.recurring = []; state.rules = []; state.snoozed = new Set(); return }
+  if (!state.budgetId) { state.cats = []; state.txns = []; state.history = []; state.assigns = []; state.recurring = []; state.rules = []; state.accounts = []; state.snapshots = []; state.snoozed = new Set(); return }
   const ms = monthStart(state.month)
-  const [c, t, r, a, sn, ru] = await Promise.all([
+  const [c, t, r, a, sn, ru, ac, bs] = await Promise.all([
     sb.from('categories').select('*').eq('budget_id', state.budgetId).order('sort').order('name'),
     // Everything up to the end of this month, not just this month: last year's
     // leftovers are part of this month's Available.
@@ -58,7 +59,11 @@ async function loadMonth() {
     // Only this month's snoozes matter — a snooze is per category per month.
     sb.from('target_snoozes').select('category_id').eq('budget_id', state.budgetId).eq('month', ms),
     // Categorization rules, in priority order (first match wins in matchRule).
-    sb.from('rules').select('*').eq('budget_id', state.budgetId).order('sort').order('created_at')
+    sb.from('rules').select('*').eq('budget_id', state.budgetId).order('sort').order('created_at'),
+    // Net-worth accounts + every balance snapshot up to this month (carry-forward
+    // + the trend both read the whole history; it's one small row per account/month).
+    sb.from('accounts').select('*').eq('budget_id', state.budgetId).order('sort').order('created_at'),
+    sb.from('balance_snapshots').select('account_id,month,balance_cents').eq('budget_id', state.budgetId).lte('month', ms)
   ])
   if (c.error) return fail(c.error)
   if (t.error) return fail(t.error)
@@ -66,6 +71,8 @@ async function loadMonth() {
   if (a.error) return fail(a.error)
   if (sn.error) return fail(sn.error)
   if (ru.error) return fail(ru.error)
+  if (ac.error) return fail(ac.error)
+  if (bs.error) return fail(bs.error)
   state.cats = c.data ?? []
   state.history = t.data ?? []
   state.txns = state.history.filter(x => x.occurred_on >= ms)
@@ -73,6 +80,8 @@ async function loadMonth() {
   state.assigns = a.data ?? []
   state.snoozed = new Set((sn.data ?? []).map(s => s.category_id))
   state.rules = ru.data ?? []
+  state.accounts = ac.data ?? []
+  state.snapshots = bs.data ?? []
 }
 
 // Rule occurrences due in the month on screen that have no transaction yet, as
@@ -116,7 +125,7 @@ const fail = e => { console.error(e); alert(e.message ?? String(e)) }
 // ---- Home dashboard config (Phase 2). Which cards show and in what order, per
 // device in localStorage. ponytail: a plain array merged with the default, so a
 // newly-added card shows up for existing users instead of silently vanishing.
-const HOME_CARD_LABELS = { alerts: 'Alerts', plan: 'Plan state', spending: 'Spending summary', upcoming: 'Upcoming bills', recent: 'Recent transactions' }
+const HOME_CARD_LABELS = { alerts: 'Alerts', plan: 'Plan state', networth: 'Net worth', spending: 'Spending summary', upcoming: 'Upcoming bills', recent: 'Recent transactions' }
 const HOME_DEFAULT = Object.keys(HOME_CARD_LABELS)
 const HOME_KEY = 'budget.home'
 function homeConfig() {
@@ -503,6 +512,13 @@ function render() {
       </div>
     </div>`
 
+  // Net worth (Phase 4): assets − liabilities as of the month on screen, from the
+  // latest snapshot per account (carry-forward). Computed once here; the Reflect
+  // card and the Home card both read it.
+  const nwMs = monthStart(state.month)
+  const nw = netWorthAt(state.accounts, state.snapshots, nwMs)
+  renderNetWorth(nw, nwMs)
+
   // --- home (Phase 2 dashboard). A configurable card stack over data already in
   // hand: roll (plan state), totalSpent vs last month (spending), pendingRecurring
   // (upcoming), state.txns (recent). Each card is a function; homeConfig() decides
@@ -535,6 +551,17 @@ function render() {
       <b class="num rta-amt home-rta-${rtaK}">${money(roll.rta)}</b>
       <span class="small muted">${overspent ? `${overspent} overspent` : 'Nothing overspent'} &middot; ${state.cats.length} categor${state.cats.length === 1 ? 'y' : 'ies'}</span>
     </button>`,
+    // Net worth: current value + change since last month; taps through to the
+    // Reflect view. Hidden entirely until an account has a balance (nw.rows empty).
+    networth: () => {
+      if (!nw.rows.length) return ''
+      const d = nw.net - netWorthAt(state.accounts, state.snapshots, prevMs).net
+      return `<button class="card home-plan" data-goto="reflect">
+        <span class="small muted">Net worth</span>
+        <b class="num rta-amt ${nw.net < 0 ? 'home-rta-over' : 'home-rta-ok'}">${money(nw.net)}</b>
+        <span class="small muted">${d === 0 ? 'No change this month' : `${money(Math.abs(d))} ${d > 0 ? 'up' : 'down'} this month`} &middot; ${nw.rows.length} account${nw.rows.length === 1 ? '' : 's'}</span>
+      </button>`
+    },
     spending: () => {
       const d = totalSpent - lastSpent
       return `<div class="card">
@@ -1645,6 +1672,129 @@ $('cal-grid').onclick = async e => {
   await loadMonth(); renderCalendar(); render()
 }
 
+// ---------------------------------------------------------------- net worth (Phase 4)
+
+const NW_RANGE_KEY = 'budget.nwrange'
+const nwRange = () => Number(localStorage.getItem(NW_RANGE_KEY)) || 6
+
+// The N month-starts ending at `ms` (inclusive), oldest first — the trend window.
+function monthsBack(ms, n) {
+  const out = []
+  let m = ms
+  for (let i = 0; i < n; i++) { out.unshift(m); m = prevMonthStart(m) }
+  return out
+}
+
+// The Reflect net worth card: total, assets/liabilities, a per-account breakdown,
+// a trend over the chosen range, and an Update-balances entry. Empty-states into an
+// "add accounts" prompt until the first account exists.
+function renderNetWorth(nw, ms) {
+  const el = $('reflect-networth')
+  if (!el) return
+  if (!state.accounts.length) {
+    el.innerHTML = `<div class="card nw-card">
+      <div class="nw-head"><span class="small muted-strong">Net worth</span></div>
+      <p class="small muted" style="margin:6px 0 12px">Track what you own minus what you owe — type in balances by hand, no bank connection.</p>
+      <button class="btn-quiet" id="nw-balances">Add accounts</button>
+    </div>`
+    return
+  }
+  const netK = nw.net > 0 ? 'home-rta-ok' : nw.net < 0 ? 'home-rta-over' : ''
+  const n = nwRange()
+  const series = netWorthSeries(state.accounts, state.snapshots, monthsBack(ms, n))
+  const maxAbs = Math.max(1, ...series.map(p => Math.abs(p.net)))
+  const bars = series.map(p => `<div class="nw-bar${p.month === ms ? ' is-current' : ''}" title="${esc(monthLabel(new Date(p.month + 'T00:00')))}: ${money(p.net)}">
+      <i class="${p.net < 0 ? 'neg' : ''}" style="height:${Math.round(Math.abs(p.net) / maxAbs * 100)}%"></i>
+    </div>`).join('')
+  const rows = nw.rows.map(r => `<div class="nw-row">
+      <span class="nw-name">${esc(r.name)}${r.stale ? ' <span class="nw-stale">stale</span>' : ''}</span>
+      <span class="nw-kind ${r.kind}">${r.kind}</span>
+      <span class="num${r.kind === 'liability' ? ' nw-neg' : ''}">${r.kind === 'liability' ? '&minus;' : ''}${money(r.balance)}</span>
+    </div>`).join('')
+  el.innerHTML = `<div class="card nw-card">
+    <div class="nw-head">
+      <span class="small muted-strong">Net worth &middot; ${esc(monthLabel(state.month))}</span>
+      <select id="nw-range" class="nw-range" aria-label="Trend range">${[6, 12, 24].map(v => `<option value="${v}"${v === n ? ' selected' : ''}>${v}m</option>`).join('')}</select>
+    </div>
+    <b class="nw-total num ${netK}">${money(nw.net)}</b>
+    <div class="small muted" style="margin-bottom:12px">Assets ${money(nw.assets)} &middot; Liabilities ${money(nw.liabilities)}</div>
+    <div class="nw-bars">${bars}</div>
+    <div class="nw-rows">${rows}</div>
+    <button class="btn-quiet" id="nw-balances">Update balances</button>
+  </div>`
+}
+
+// Card buttons are re-rendered each pass, so delegate off the static container.
+$('reflect-networth').onclick = e => { if (e.target.closest('#nw-balances')) openBalances() }
+$('reflect-networth').onchange = e => {
+  if (e.target.id === 'nw-range') { localStorage.setItem(NW_RANGE_KEY, e.target.value); render() }
+}
+
+function openBalances() {
+  $('acct-kind').value = 'asset'; $('acct-name').value = ''
+  renderBalances()
+  $('balances-dialog').showModal()
+}
+$('bal-done').onclick = () => { $('balances-dialog').close(); refresh() }
+$('balances-dialog').onclick = e => { if (e.target === $('balances-dialog')) { $('balances-dialog').close(); refresh() } }
+
+function renderBalances() {
+  const ms = monthStart(state.month)
+  $('bal-sub').textContent = `Balances for ${monthLabel(state.month)}`
+  const live = state.accounts.filter(a => !a.archived)
+  $('bal-list').innerHTML = live.length ? live.map(a => {
+    const here = state.snapshots.find(s => s.account_id === a.id && s.month === ms)
+    // carried-forward (latest ≤ ms) drives the placeholder so you can see the last
+    // known figure without it counting as this month's entry.
+    const carried = netWorthAt([a], state.snapshots, ms).rows[0]
+    return `<div class="bal-row">
+      <span class="bal-name">${esc(a.name)} <span class="nw-kind ${a.kind}">${a.kind}</span></span>
+      <input class="num bal-input" type="text" inputmode="decimal" data-bal="${a.id}"
+             value="${here ? (here.balance_cents / 100).toFixed(2) : ''}"
+             placeholder="${carried ? (carried.balance / 100).toFixed(2) : '0.00'}" aria-label="Balance for ${esc(a.name)}">
+      <button class="row-del" data-archive="${a.id}" aria-label="Archive ${esc(a.name)}">&times;</button>
+    </div>`
+  }).join('') : '<div class="empty">No accounts yet. Add one below.</div>'
+}
+
+$('acct-add').onsubmit = async e => {
+  e.preventDefault()
+  if (!state.budgetId) return
+  const name = $('acct-name').value.trim()
+  if (!name) return
+  const sort = state.accounts.length ? Math.max(...state.accounts.map(a => a.sort ?? 0)) + 1 : 0
+  const { error } = await sb.from('accounts').insert({ budget_id: state.budgetId, name, kind: $('acct-kind').value, sort })
+  if (error) return fail(error)
+  $('acct-name').value = ''
+  await loadMonth(); renderBalances()
+}
+
+$('bal-save').onclick = async () => {
+  const ms = monthStart(state.month)
+  const rows = []
+  for (const inp of document.querySelectorAll('[data-bal]')) {
+    const v = inp.value.trim()
+    if (v === '') continue                       // blank = leave the month as-is
+    const val = evalAmount(v)
+    if (val == null) return alert(`"${inp.value}" isn't a number.`)
+    rows.push({ account_id: inp.dataset.bal, budget_id: state.budgetId, month: ms, balance_cents: cents(val) })
+  }
+  if (rows.length) {
+    const { error } = await sb.from('balance_snapshots').upsert(rows, { onConflict: 'account_id,month' })
+    if (error) return fail(error)
+  }
+  await loadMonth(); renderBalances(); render()
+}
+
+$('bal-list').onclick = async e => {
+  const b = e.target.closest('[data-archive]')
+  if (!b) return
+  if (!confirm('Archive this account? Its balance history is kept, but it drops out of net worth.')) return
+  const { error } = await sb.from('accounts').update({ archived: true }).eq('id', b.dataset.archive)
+  if (error) return fail(error)
+  await loadMonth(); renderBalances(); render()
+}
+
 // ---------------------------------------------------------------- money moves
 
 // The assignment trail, loaded lazily when opened rather than on every month load
@@ -1774,6 +1924,22 @@ function previewSeed() {
   state.rules = [
     { id: 'pv-rule1', match: 'metro',  category_id: 'pv-groc', flag: 'green', sort: 0 },
     { id: 'pv-rule2', match: 'amazon', category_id: 'pv-fun',  flag: null,    sort: 1 }
+  ]
+  // Net worth fixtures: two assets + a liability, a few months of snapshots. Visa
+  // has no entry this month, so it carries forward and reads stale.
+  const pm = prevMonthStart(ms), pm2 = prevMonthStart(pm)
+  state.accounts = [
+    { id: 'pv-chk',  name: 'Checking', kind: 'asset',     sort: 0, archived: false },
+    { id: 'pv-sav',  name: 'Savings',  kind: 'asset',     sort: 1, archived: false },
+    { id: 'pv-visa', name: 'Visa',     kind: 'liability', sort: 2, archived: false }
+  ]
+  state.snapshots = [
+    { account_id: 'pv-chk',  month: pm2, balance_cents: 300000 },
+    { account_id: 'pv-chk',  month: pm,  balance_cents: 320000 },
+    { account_id: 'pv-chk',  month: ms,  balance_cents: 350000 },
+    { account_id: 'pv-sav',  month: pm2, balance_cents: 800000 },
+    { account_id: 'pv-sav',  month: ms,  balance_cents: 850000 },
+    { account_id: 'pv-visa', month: pm,  balance_cents: 120000 }
   ]
   $('login').hidden = true
   $('app').hidden = false

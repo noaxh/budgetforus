@@ -113,6 +113,37 @@ export function retroApply(txns, rules) {
   return out
 }
 
+// ---------------------------------------------------------------- net worth (Phase 4)
+
+// Net worth as of `month` ('YYYY-MM-01'): for each non-archived account, its most
+// recent snapshot on or before that month (CARRY-FORWARD — a month you didn't
+// update keeps the last figure), assets added and liabilities subtracted, all in
+// cents. Returns { net, assets, liabilities, rows } where each row is
+// {id, name, kind, balance, stale} and stale = the balance is carried forward
+// (no snapshot exactly this month). An account with no snapshot yet is not counted
+// and gets no row. Pure + selftested.
+export function netWorthAt(accounts, snapshots, month) {
+  let assets = 0, liabilities = 0
+  const rows = []
+  for (const acc of accounts || []) {
+    if (acc.archived) continue
+    let latest = null
+    for (const s of snapshots || []) {
+      if (s.account_id !== acc.id || s.month > month) continue
+      if (!latest || s.month > latest.month) latest = s
+    }
+    if (!latest) continue
+    const bal = latest.balance_cents
+    if (acc.kind === 'liability') liabilities += bal; else assets += bal
+    rows.push({ id: acc.id, name: acc.name, kind: acc.kind, balance: bal, stale: latest.month !== month })
+  }
+  return { net: assets - liabilities, assets, liabilities, rows }
+}
+
+// Net worth at each of `months` (array of 'YYYY-MM-01'), for the trend chart. Pure.
+export const netWorthSeries = (accounts, snapshots, months) =>
+  months.map(m => ({ month: m, net: netWorthAt(accounts, snapshots, m).net }))
+
 // A category's expenses within [from, to] inclusive, in cents. The date window is
 // the only thing here that can be quietly wrong, so it carries a selftest.
 export const sumSpentInRange = (history, id, from, to) =>
@@ -449,6 +480,27 @@ if (location.search.includes('selftest')) {
   eq(ra[0].id, 't1', 'first change is the uncategorized Amazon row')
   eq(ra[0].flag, 'blue', 'rule flag fills a blank flag')
   eq(ra[1].flag, 'red', 'an existing flag is kept, not stomped')
+
+  // Net worth: latest snapshot on/before the month, assets minus liabilities,
+  // carry-forward, archived excluded.
+  const ACC = [{ id: 'chk', name: 'Checking', kind: 'asset' }, { id: 'card', name: 'Visa', kind: 'liability' }, { id: 'old', name: 'Closed', kind: 'asset', archived: true }]
+  const SNAP = [
+    { account_id: 'chk',  month: '2026-06-01', balance_cents: 500000 },
+    { account_id: 'chk',  month: '2026-07-01', balance_cents: 550000 },
+    { account_id: 'card', month: '2026-06-01', balance_cents: 120000 },
+    { account_id: 'old',  month: '2026-07-01', balance_cents: 999999 }
+  ]
+  const nw = netWorthAt(ACC, SNAP, '2026-07-01')
+  eq(nw.assets, 550000, 'net worth assets use the latest snapshot on/before the month')
+  eq(nw.liabilities, 120000, 'liability carried forward from June (no July entry)')
+  eq(nw.net, 430000, 'net = assets − liabilities, archived excluded')
+  eq(nw.rows.find(r => r.id === 'card').stale, true, 'a carried-forward account reads stale')
+  eq(nw.rows.find(r => r.id === 'chk').stale, false, 'an account updated this month is not stale')
+  eq(nw.rows.some(r => r.id === 'old'), false, 'an archived account is excluded')
+  eq(netWorthAt(ACC, SNAP, '2026-05-01').net, 0, 'before any snapshot, net worth is zero')
+  const nser = netWorthSeries(ACC, SNAP, ['2026-06-01', '2026-07-01'])
+  eq(nser[0].net, 380000, 'June net = 500000 − 120000')
+  eq(nser[1].net, 430000, 'July net = 550000 − 120000 (checking updated)')
 
   const SP = [
     { category_id: 'g', kind: 'expense', amount: 10, occurred_on: '2026-06-15' },

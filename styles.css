@@ -901,6 +901,38 @@ dialog[open]::backdrop {
 .cl-title { font-weight: 800; font-size: var(--fs-section); color: var(--ink); }
 .cl-items { margin: 0; padding-left: 1.1em; }
 .cl-items li { font-size: var(--fs-meta); color: var(--ink-2); margin-top: 4px; }
+
+/* ---- net worth (Phase 4) ---------------------------------------------------
+   The Reflect card: total, a per-account breakdown, and a bar trend over a range.
+   Reuses .card; the RTA state colors (home-rta-ok/over) tint the total. */
+.nw-card { margin-top: var(--s4); }
+.nw-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.nw-range { flex: none; min-height: 32px; padding: 2px var(--s2); border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--paper); font-size: var(--fs-meta); font-weight: 700; color: var(--ink); }
+.nw-total { display: block; font-family: var(--font-display); font-size: var(--fs-rta); font-weight: 800; line-height: 1.1; margin-top: var(--s1); }
+/* Trend: fixed-height row of bars, current month accented. */
+.nw-bars { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin-bottom: var(--s3); }
+.nw-bar { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.nw-bar i { display: block; width: 100%; min-height: 2px; background: var(--brand-tint); border-radius: 3px 3px 0 0; }
+.nw-bar.is-current i { background: var(--brand); }
+.nw-bar i.neg { background: var(--over-tint); }
+.nw-bar.is-current i.neg { background: var(--over-pill); }
+/* Per-account rows. */
+.nw-rows { border-top: 1px solid var(--hairline); }
+.nw-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: var(--s2); padding: var(--s2) 0; }
+.nw-row + .nw-row { border-top: 1px solid var(--hairline); }
+.nw-name { font-weight: 600; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nw-neg { color: var(--over-fg); }
+.nw-kind { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 7px; border-radius: var(--r-pill); }
+.nw-kind.asset { background: var(--ok-tint); color: var(--ok-fg); }
+.nw-kind.liability { background: var(--over-tint); color: var(--over-fg); }
+.nw-stale { font-size: var(--fs-micro); font-weight: 700; color: var(--under-fg); background: var(--under-pill); padding: 1px 6px; border-radius: var(--r-pill); }
+.nw-card .btn-quiet { margin-top: var(--s3); }
+/* Balances dialog rows. */
+.bal-row { display: grid; grid-template-columns: 1fr 120px auto; align-items: center; gap: var(--s2); padding: var(--s2) 0; }
+.bal-row + .bal-row { border-top: 1px solid var(--hairline); }
+.bal-name { display: flex; align-items: center; gap: var(--s2); font-weight: 600; min-width: 0; }
+.bal-name span { flex: none; }
+.bal-input { min-height: var(--tap); text-align: right; }
 .aa-modes { display: flex; flex-direction: column; gap: var(--s2); }
 .aa-modes .btn-quiet { display: block; width: 100%; text-align: left; }
 .danger-zone { margin-top: var(--s8); text-align: center; }

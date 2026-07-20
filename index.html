@@ -177,6 +177,10 @@
       <!-- aom (kit): Age of Money. render() fills it, or leaves it empty until
            there's banked income to measure against. -->
       <div id="reflect-aom"></div>
+      <!-- networth (Phase 4): assets − liabilities as of the month on screen, a
+           per-account breakdown and a trend. render() fills it (empty-states into
+           an "add accounts" prompt until the first account exists). -->
+      <div id="reflect-networth"></div>
     </section>
 
     <section class="screen" id="screen-settings" data-screen="settings" hidden>
@@ -599,6 +603,39 @@
     <div id="changelog-list" class="changelog"></div>
     <div class="sheet-actions">
       <button type="button" class="btn" id="changelog-done">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Balances (Phase 4). Type this month's balance per account; blank = leave the
+     month as-is (the last figure carries forward and reads stale). Add/archive
+     accounts here too. Net worth math and the trend live on the Reflect tab. -->
+<dialog id="balances-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Balances</h2></div>
+    <div class="small muted" id="bal-sub" style="margin-bottom:10px"></div>
+    <div id="bal-list"></div>
+    <form id="acct-add" style="margin-top:14px">
+      <div class="row-2">
+        <div class="field" style="margin-top:0">
+          <label for="acct-name">New account</label>
+          <input type="text" id="acct-name" maxlength="60" placeholder="Checking" autocomplete="off">
+        </div>
+        <div class="field" style="margin-top:0">
+          <label for="acct-kind">Type</label>
+          <select id="acct-kind">
+            <option value="asset">Asset</option>
+            <option value="liability">Liability</option>
+          </select>
+        </div>
+      </div>
+      <div class="sheet-actions">
+        <button type="submit" class="btn-quiet">Add account</button>
+      </div>
+    </form>
+    <div class="sheet-actions">
+      <button type="button" class="btn-quiet" id="bal-done">Done</button>
+      <button type="button" class="btn" id="bal-save">Save balances</button>
     </div>
   </div>
 </dialog>
