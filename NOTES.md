@@ -815,17 +815,61 @@ Kills most manual categorization, which is the main daily friction left.
   existing rows on date + amount + description, preview before commit. Phase 3
   rules categorize incoming rows. The sanctioned substitute for bank sync.
 
-### Phase 6: category + plan management
+### Phase 6: category + plan management — BUILT 2026-07-21 (`schema-v10.sql`)
 
-Old Phase G plus the lifecycle bits of F. Cheap, isolated, slot between phases.
+Old Phase G plus the lifecycle bits of F. Taken out of order (Phase 5 is gated
+on a real bank export existing). Migration `schema-v10.sql` (`archived`, `notes`)
+must run before the client deploys. Verified via `?selftest` and `?preview`.
 
-- Reorder categories (M). `sort_order`; drag on desktop, up/down on phone.
-- Category notes, emoji icon, color (S each).
-- Hide, archive, merge a category (S each). Merge moves history then archives
-  the source; the Monarch nicety the audit lacked.
-- Future-month assigning (M). Assign in a month ahead and roll it forward.
-  Still not forecasting.
-- Copy budget (S), archive budget (S), Fresh Start (M).
+Two thirds of the listed scope did not survive the ladder, which is the useful
+record here:
+
+- Reorder categories (M). DONE, and it needed no migration. `categories.sort`
+  has existed since `schema.sql` (`int not null default 0`) and the load has
+  always ordered by it — but nothing ever *wrote* it, so every row sat at 0 and
+  the tiebreak on name did the real ordering. Up/down arrows in the manage
+  dialog, reusing the `.rule-move` idiom from Phase 3; the first press re-packs
+  the whole live list to its array index, healing the all-zeros legacy state.
+  ponytail: no drag-and-drop — HTML5 DnD needs a library to work on touch, and
+  arrows work identically on both.
+- Hide + archive a category (S). DONE, as **one** `archived` flag. Hide and
+  archive were the same act at this scale, so they are one thing. This is also
+  the correct way to retire a category: deleting one sets `category_id` to null
+  on its past transactions, dropping that spending into Ready to Assign and
+  rewriting closed months (the defect recorded below). Archiving touches no
+  transaction. The delete confirm now points at it.
+
+  **The invariant this rests on:** `rollup` only knows the categories it is
+  handed, and `core.js` silently *drops* a transaction pointing at one that is
+  missing (`if (!e) continue` — it does not fall through into uncategorized). So
+  `state.cats` stays the complete list and only the display sites filter, via
+  `liveCats()`. Hand `rollup` the filtered list instead and an archived
+  envelope's past spending vanishes, inflating Ready to Assign by exactly that
+  amount — measured at $45 on the preview fixture. Two `?selftest` assertions
+  now pin this. Name lookups deliberately read the full list, so an old
+  transaction still shows its category name, and the transaction editor keeps an
+  archived category selectable on the row already in it (labelled "(archived)")
+  so saving can't quietly re-point it at Uncategorized.
+
+  Guard: archiving a category that still holds money is refused, since an
+  archived envelope with a balance is money you can no longer see. Move it out
+  first — the move sheet already does that in two taps.
+- Category notes (S). DONE. One `notes` column, rendered in the move sheet,
+  which is where you're deciding about the envelope, rather than on the plan row
+  where it would just add density.
+- Category emoji, colour (S each). CUT. An emoji typed into the name field is
+  the same feature for zero code, and `group_name` already does the organizing
+  that colour would duplicate.
+- Merge a category (S). CUT. The bulk action bar (Phase C) recategorizes the
+  source's transactions, and deleting the now-empty category is then harmless —
+  two steps, no new code. Revisit if that proves annoying in real use.
+- Future-month assigning (M). ALREADY WORKED. `goMonth` never clamped forward
+  and `assign` has no month guard; the only future-month guard in the codebase
+  is `maybeAutoApply`, which deliberately refuses to auto-add recurring
+  transactions into a month you are merely browsing. Nothing to build.
+- Copy budget (S), archive budget (S), Fresh Start (M). CUT. Two people, one
+  budget; delete-budget already exists. Speculative until someone wants a second
+  budget for real.
 
 ### Phase 7: productivity + QoL
 
@@ -862,9 +906,10 @@ Old Phase I. Opportunistic.
 ### Order
 
 Phase 1, then 2, then 3, then 4: finish the core, then the visible Monarch
-win, then automation, then net worth. Phase 5 when the first real bank export
-shows up. Phases 6 and 7 are unblocked fillers for whenever momentum is
-wanted. Everything honors the locked decisions: static files, no build step,
+win, then automation, then net worth. **All four shipped and deployed by
+2026-07-21**, migrations v7/v8/v9 confirmed run by REST probe. Phase 6 was then
+pulled forward and built, because Phase 5 stays gated on the first real bank
+export showing up. Phase 7 is the remaining unblocked filler. Everything honors the locked decisions: static files, no build step,
 `kind` column never signed amounts, integer cents, RLS as the only gate, no
 Plaid.
 
@@ -1153,6 +1198,9 @@ independently of the phases.
   non-zero, says the spending moves into Ready to Assign and changes past months.
   We warn, we do not block. Ceiling: the count is from history loaded up to the
   month on screen, so it under-reports when viewing an earlier month.
+  **Superseded 2026-07-21 (Phase 6):** archiving is now the intended way to retire
+  a category and has none of this behaviour, because it touches no transaction.
+  The warning stays and now names archive as the alternative.
 - **No realtime sync** (RESOLVED 2026-07-16, ponytail). app.js now refreshes on
   `visibilitychange` when the tab returns to view, so a partner's changes show up
   on refocus instead of never. Ceiling: this is not live-while-both-looking, and

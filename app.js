@@ -25,6 +25,14 @@ const $ = id => document.getElementById(id)
 // same numbers, so the four states and Ready to Assign never disagree between
 // the banner, the table, and an auto-assign preview.
 const rollNow = () => rollup(state.cats, state.assigns, state.history, monthStart(state.month), state.snoozed)
+
+// Archived categories (Phase 6) are retired, not deleted: every transaction still
+// points at them, so rollup and the reports must keep seeing them or their past
+// spending would vanish and inflate Ready to Assign. state.cats therefore stays
+// the complete list and only the *display* sites filter — the plan, the pickers,
+// the counts, auto-assign. Name lookups deliberately read state.cats, so an old
+// transaction in an archived category still shows its category name.
+const liveCats = () => state.cats.filter(c => !c.archived)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
 // ---------------------------------------------------------------- data
@@ -148,7 +156,7 @@ const ctbmIncome = () => Number(localStorage.getItem(ctbmKey())) || 0
 // Categories still sitting at zero that have a target to fill. Untouched only:
 // overwriting a number someone typed on purpose is not a convenience.
 const unfilledCats = roll =>
-  state.cats.filter(c => cents(c.monthly_limit) > 0 && (roll.cats.get(c.id)?.assigned ?? 0) === 0)
+  liveCats().filter(c => cents(c.monthly_limit) > 0 && (roll.cats.get(c.id)?.assigned ?? 0) === 0)
 
 // Auto-assign modes. Amounts stay in cents until the last step to dodge float
 // drift, then convert to dollars for assign(). Every mode derives from data we
@@ -161,7 +169,7 @@ function autoAssignRows(mode, roll, scope = null) {
   // scope restricts a run to one category group (or all when null). Everything
   // below maps over this list, so every mode is group-scopable for free.
   const inScope = c => !scope || (c.group_name || '') === scope
-  const scoped = state.cats.filter(inScope)
+  const scoped = liveCats().filter(inScope)
   const row = (c, amount) => ({ budget_id: state.budgetId, category_id: c.id, month: ms, amount })
   const assignedIn = (id, m) => state.assigns.filter(a => a.category_id === id && a.month === m).reduce((s, a) => s + cents(a.amount), 0)
   // The N month-starts before `ms`, newest first — the window the averages read.
@@ -238,7 +246,7 @@ function render() {
           : roll.rta > 0 ? 'Give every dollar a job.'
           : 'Every dollar has a job.'}</span>
       </div>
-      ${state.cats.length ? '<button class="btn-quiet" id="auto-assign">Auto-assign</button>' : ''}
+      ${liveCats().length ? '<button class="btn-quiet" id="auto-assign">Auto-assign</button>' : ''}
     </div>`
 
   // --- inspector summary card: month totals + Cost to Be Me. CTBM is the sum
@@ -246,8 +254,8 @@ function render() {
   // types (localStorage per budget; a personal what-if, not budget data).
   // Snoozed categories are excluded — you've said skip them this month, so they
   // don't add to what it costs to be you this month.
-  const costToBeMe = state.cats.reduce((s, c) => { const e = roll.cats.get(c.id); return s + (e && !e.snoozed ? e.needed : 0) }, 0)
-  const hasTargets = state.cats.some(c => c.target_kind)
+  const costToBeMe = liveCats().reduce((s, c) => { const e = roll.cats.get(c.id); return s + (e && !e.snoozed ? e.needed : 0) }, 0)
+  const hasTargets = liveCats().some(c => c.target_kind)
   const incomeC = cents(ctbmIncome())
   const ctbm = hasTargets ? `
     <div class="ctbm">
@@ -277,7 +285,7 @@ function render() {
       `${pend.length} recurring ${pend.length === 1 ? 'item' : 'items'} not added for ${monthLabel(state.month)}.`
   }
 
-  $('cat-count').textContent = state.cats.length ? `${state.cats.length}` : ''
+  $('cat-count').textContent = liveCats().length ? `${liveCats().length}` : ''
 
   // --- avail pill (kit): the four states, quadruple-coded — fill, text color,
   // label, and the amount's own sign — so the verdict survives color-blindness.
@@ -345,7 +353,7 @@ function render() {
     ['all', 'All'], ['under', 'Underfunded'], ['over', 'Overspent'],
     ['available', 'Has money'], ['overfunded', 'Overfunded'], ['snoozed', 'Snoozed']
   ]
-  const viewCount = v => state.cats.filter(c => {
+  const viewCount = v => liveCats().filter(c => {
     const e = roll.cats.get(c.id)
     return v === 'all' ? true
       : v === 'under' ? e?.status === 'under'
@@ -355,12 +363,12 @@ function render() {
       : v === 'snoozed' ? e?.snoozed
       : false
   }).length
-  $('view-bar').innerHTML = state.cats.length ? VIEWS.map(([v, label]) => {
+  $('view-bar').innerHTML = liveCats().length ? VIEWS.map(([v, label]) => {
     const n = viewCount(v)
     return `<button class="view-chip${state.view === v ? ' is-active' : ''}" data-view="${v}"${v !== 'all' && !n ? ' disabled' : ''}>${label}${v === 'all' ? '' : ` <span class="view-n">${n}</span>`}</button>`
   }).join('') : ''
 
-  const shownCats = state.cats.filter(c => viewMatch(c, roll.cats.get(c.id)))
+  const shownCats = liveCats().filter(c => viewMatch(c, roll.cats.get(c.id)))
   const groups = new Map()
   for (const c of shownCats) {
     const g = c.group_name || ''
@@ -368,7 +376,7 @@ function render() {
     groups.get(g).push(c)
   }
   const order = [...groups.keys()].sort((a, b) => a === '' ? -1 : b === '' ? 1 : a.localeCompare(b))
-  $('categories').innerHTML = !state.cats.length
+  $('categories').innerHTML = !liveCats().length
     ? '<div class="empty">No categories yet. Add some, then give each one a job.</div>'
     : !shownCats.length
     ? `<div class="empty">No categories ${VIEWS.find(v => v[0] === state.view)?.[1].toLowerCase()} this month.</div>`
@@ -524,7 +532,7 @@ function render() {
   // (upcoming), state.txns (recent). Each card is a function; homeConfig() decides
   // order and visibility. Cards that would be empty (no alerts, no bills) return ''
   // and are dropped, so the stack never shows a hollow card.
-  const overspent = state.cats.filter(c => roll.cats.get(c.id)?.status === 'over').length
+  const overspent = liveCats().filter(c => roll.cats.get(c.id)?.status === 'over').length
   const prevMs = prevMonthStart(monthStart(state.month))
   const prevEndS = monthEnd(new Date(prevMs + 'T00:00'))
   const lastSpent = state.history
@@ -549,7 +557,7 @@ function render() {
     plan: () => `<button class="card home-plan" data-goto="budget">
       <span class="small muted">Ready to Assign</span>
       <b class="num rta-amt home-rta-${rtaK}">${money(roll.rta)}</b>
-      <span class="small muted">${overspent ? `${overspent} overspent` : 'Nothing overspent'} &middot; ${state.cats.length} categor${state.cats.length === 1 ? 'y' : 'ies'}</span>
+      <span class="small muted">${overspent ? `${overspent} overspent` : 'Nothing overspent'} &middot; ${liveCats().length} categor${liveCats().length === 1 ? 'y' : 'ies'}</span>
     </button>`,
     // Net worth: current value + change since last month; taps through to the
     // Reflect view. Hidden entirely until an account has a balance (nw.rows empty).
@@ -1068,7 +1076,7 @@ function openMove(catId) {
   state.moveCat = catId
   const over = e.available < 0
   const opts = sel => `<option value="__rta__"${sel === '__rta__' ? ' selected' : ''}>Ready to Assign</option>` +
-    state.cats.map(x => `<option value="${x.id}"${x.id === sel ? ' selected' : ''}>${esc(x.name)}</option>`).join('')
+    liveCats().map(x => `<option value="${x.id}"${x.id === sel ? ' selected' : ''}>${esc(x.name)}</option>`).join('')
   $('move-from').innerHTML = opts(over ? '__rta__' : catId)   // cover: pull IN from RTA; else move OUT to RTA
   $('move-to').innerHTML   = opts(over ? catId : '__rta__')
   const prefill = over ? -e.available : (e.available > 0 ? e.available : 0)
@@ -1077,6 +1085,11 @@ function openMove(catId) {
   $('move-avail').className = `avail s-${e.status}`
   $('move-avail').innerHTML = `<b class="num">${money(e.available)}</b><i>${
     over ? 'Overspent' : e.status === 'under' ? `Needs ${money(e.needed)}` : e.status === 'ok' ? 'Available' : 'Empty'}</i>`
+  // The note lives here rather than on the plan row: this sheet is where you're
+  // deciding about the envelope, so "why does this exist" belongs where the
+  // decision is. Empty note, no element.
+  $('move-note').textContent = c.notes ?? ''
+  $('move-note').hidden = !c.notes
   $('move-snooze-wrap').hidden = !c.target_kind
   $('move-snooze').checked = state.snoozed.has(catId)
   $('move-err').hidden = true
@@ -1138,7 +1151,7 @@ $('summary').onchange = e => {
 // Open the modes sheet: refresh the group-scope picker from the current groups
 // first (it's a per-run choice, defaulting to all categories).
 function openAutoAssign() {
-  const groups = [...new Set(state.cats.map(c => c.group_name).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  const groups = [...new Set(liveCats().map(c => c.group_name).filter(Boolean))].sort((a, b) => a.localeCompare(b))
   $('aa-scope').innerHTML = `<option value="">All categories</option>` +
     groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('')
   $('aa-dialog').showModal()
@@ -1153,9 +1166,13 @@ $('aa-dialog').onclick = e => {
   if (rows.length) assign(rows)
 }
 
+// Archived categories drop out of the picker, except the one this row is already
+// in — otherwise opening an old transaction would quietly re-point it at
+// Uncategorized the moment you saved.
 const catOptions = (selected, blank = 'Uncategorized') =>
   `<option value="">${blank}</option>` +
-  state.cats.map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.name)}</option>`).join('')
+  state.cats.filter(c => !c.archived || c.id === selected)
+    .map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.name)}${c.archived ? ' (archived)' : ''}</option>`).join('')
 
 function openTxn(t) {
   state.editing = t?.id ?? null
@@ -1356,16 +1373,33 @@ $('cat-done').onclick = () => { $('cat-dialog').close(); refresh() }
 function renderCats() {
   const kindOpts = k => [['', 'No target'], ['monthly', 'Monthly refill'], ['by_date', 'By date']]
     .map(([v, l]) => `<option value="${v}" ${(k ?? '') === v ? 'selected' : ''}>${l}</option>`).join('')
-  $('cat-list').innerHTML = state.cats.map(c => `
+  // Live rows carry the full editor and the reorder arrows; archived rows collapse
+  // to a name and a way back, because an archived category is not something you
+  // tune, it's something you either restore or delete.
+  const live = liveCats(), archived = state.cats.filter(c => c.archived)
+  $('cat-list').innerHTML = live.map((c, i) => `
     <div class="cat-edit">
+      <div class="cat-move">
+        <button type="button" class="btn-quiet" data-catup="${c.id}"${i === 0 ? ' disabled' : ''} aria-label="Move ${esc(c.name)} up">&uarr;</button>
+        <button type="button" class="btn-quiet" data-catdown="${c.id}"${i === live.length - 1 ? ' disabled' : ''} aria-label="Move ${esc(c.name)} down">&darr;</button>
+      </div>
       <input type="text" value="${esc(c.name)}" maxlength="40" data-name="${c.id}" aria-label="Name">
       <input type="number" value="${c.monthly_limit}" step="0.01" min="0" inputmode="decimal" data-limit="${c.id}" aria-label="Target amount">
       <button class="row-del" data-delcat="${c.id}" aria-label="Delete category">&times;</button>
       <select class="cat-kind" data-kind="${c.id}" aria-label="Target kind">${kindOpts(c.target_kind)}</select>
       <input type="date" class="cat-due" value="${c.target_due ?? ''}" data-due="${c.id}" aria-label="Target date"${c.target_kind === 'by_date' ? '' : ' hidden'}>
       <input type="text" class="cat-group" value="${esc(c.group_name ?? '')}" maxlength="40" list="group-list" placeholder="Group (optional)" data-group="${c.id}" aria-label="Group">
-    </div>`).join('')
-  $('group-list').innerHTML = [...new Set(state.cats.map(c => c.group_name).filter(Boolean))]
+      <input type="text" class="cat-note" value="${esc(c.notes ?? '')}" maxlength="280" placeholder="Note — why this envelope exists (optional)" data-note="${c.id}" aria-label="Note">
+      <button type="button" class="btn-quiet cat-arch" data-arch="${c.id}">Archive</button>
+    </div>`).join('') + (archived.length ? `
+    <div class="cat-arch-head small muted">Archived &middot; ${archived.length}. Still counted in past months and reports.</div>` +
+    archived.map(c => `
+    <div class="cat-edit is-archived">
+      <span class="cat-arch-name">${esc(c.name)}</span>
+      <button type="button" class="btn-quiet" data-arch="${c.id}">Unarchive</button>
+      <button class="row-del" data-delcat="${c.id}" aria-label="Delete category">&times;</button>
+    </div>`).join('') : '')
+  $('group-list').innerHTML = [...new Set(liveCats().map(c => c.group_name).filter(Boolean))]
     .map(g => `<option value="${esc(g)}">`).join('')
 }
 
@@ -1390,10 +1424,11 @@ $('cat-add').onsubmit = async e => {
 // Save each field as it changes. ponytail: no dirty tracking, no save button.
 $('cat-list').onchange = async e => {
   const d = e.target.dataset
-  const id = d.name ?? d.limit ?? d.kind ?? d.due ?? d.group
+  const id = d.name ?? d.limit ?? d.kind ?? d.due ?? d.group ?? d.note
   if (!id) return
   let patch
-  if (d.name) { patch = { name: e.target.value.trim() }; if (patch.name === '') return }
+  if (d.note) patch = { notes: e.target.value.trim() || null }
+  else if (d.name) { patch = { name: e.target.value.trim() }; if (patch.name === '') return }
   else if (d.limit) patch = { monthly_limit: Number(e.target.value) || 0 }
   // Changing the kind clears a stale due date when it's no longer a by-date goal,
   // so an old date can't quietly drive the by-date math after a switch away.
@@ -1406,6 +1441,50 @@ $('cat-list').onchange = async e => {
 }
 
 $('cat-list').onclick = async e => {
+  // Reorder. `categories.sort` has existed since v1 and sat at 0 on every row, so
+  // re-pack the whole live list to its array index rather than swapping two values
+  // — same trick the rules list uses, and it heals the all-zeros legacy state on
+  // the first press. Archived rows keep whatever sort they had; unarchiving puts
+  // them at the bottom.
+  const up = e.target.closest('[data-catup]'), down = e.target.closest('[data-catdown]')
+  if (up || down) {
+    const id = (up || down).dataset[up ? 'catup' : 'catdown']
+    const arr = liveCats()
+    const i = arr.findIndex(c => c.id === id), j = i + (up ? -1 : 1)
+    if (j < 0 || j >= arr.length) return
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+    const errs = await Promise.all(arr.map((c, k) => c.sort === k ? null : sb.from('categories').update({ sort: k }).eq('id', c.id)).filter(Boolean))
+    const bad = errs.find(r => r?.error)
+    if (bad) return fail(bad.error)
+    await loadMonth(); renderCats(); render()
+    return
+  }
+
+  // Archive / unarchive. Archiving a category that still holds money would hide
+  // that money rather than free it, so refuse and point at the fix; the move sheet
+  // empties an envelope in two taps. Zero available is the only safe state.
+  const arch = e.target.closest('[data-arch]')
+  if (arch) {
+    const id = arch.dataset.arch
+    const c = state.cats.find(x => x.id === id)
+    if (!c) return
+    if (!c.archived) {
+      const env = rollNow().cats.get(id)
+      if (env && env.available !== 0) {
+        return alert(`${c.name} still holds ${money(env.available)}. Move that out first — archiving keeps the money but stops showing the category, so the balance would be invisible.`)
+      }
+    }
+    // Coming back from archived, land at the bottom of the list rather than
+    // wherever the old sort put you. Archiving leaves sort alone — writing it back
+    // would only risk sending undefined at a not-null column.
+    const patch = { archived: !c.archived }
+    if (c.archived) patch.sort = state.cats.length ? Math.max(...state.cats.map(x => x.sort ?? 0)) + 1 : 0
+    const { error } = await sb.from('categories').update(patch).eq('id', id)
+    if (error) return fail(error)
+    await loadMonth(); renderCats(); render()
+    return
+  }
+
   const b = e.target.closest('[data-delcat]')
   if (!b) return
   // Deleting nulls category_id on this category's past transactions, so their
@@ -1416,7 +1495,7 @@ $('cat-list').onclick = async e => {
   // under-report when you're viewing an earlier month. Good enough for a warning.
   const n = state.history.filter(t => t.category_id === b.dataset.delcat).length
   const msg = n
-    ? `Delete this category? Its ${n} transaction${n === 1 ? '' : 's'} stay but become uncategorized, which moves that spending into Ready to Assign and changes past months.`
+    ? `Delete this category? Its ${n} transaction${n === 1 ? '' : 's'} stay but become uncategorized, which moves that spending into Ready to Assign and changes past months.\n\nArchive instead to retire it with history intact.`
     : 'Delete this category? Nothing is logged in it yet.'
   if (!confirm(msg)) return
   const { error } = await sb.from('categories').delete().eq('id', b.dataset.delcat)
@@ -1897,20 +1976,26 @@ function previewSeed() {
     { id: 'pv-groc', name: 'Groceries',  group_name: 'Everyday', monthly_limit: 0,    target_kind: null },
     { id: 'pv-dine', name: 'Dining out', group_name: 'Everyday', monthly_limit: 0,    target_kind: null },
     { id: 'pv-fun',  name: 'Fun money',  group_name: 'Everyday', monthly_limit: 0,    target_kind: null },
-    { id: 'pv-trip', name: 'Road trip',  group_name: 'Savings',  monthly_limit: 1200, target_kind: 'by_date', target_due: due }
+    { id: 'pv-trip', name: 'Road trip',  group_name: 'Savings',  monthly_limit: 1200, target_kind: 'by_date', target_due: due, notes: 'East coast, two weeks in September.' },
+    // Phase 6: an archived category that still owns a past transaction. It must
+    // stay out of the plan and the pickers while its spending stays inside the
+    // reports and out of Ready to Assign.
+    { id: 'pv-gym',  name: 'Old gym',    group_name: 'Everyday', monthly_limit: 0,    target_kind: null, archived: true }
   ]
   state.assigns = [
     { category_id: 'pv-rent', month: ms, amount: 1800 },
     { category_id: 'pv-hyd',  month: ms, amount: 90 },
     { category_id: 'pv-groc', month: ms, amount: 400 },
     { category_id: 'pv-dine', month: ms, amount: 60 },
-    { category_id: 'pv-trip', month: ms, amount: 200 }
+    { category_id: 'pv-trip', month: ms, amount: 200 },
+    { category_id: 'pv-gym',  month: ms, amount: 45 }   // archived, and emptied by its own spending
   ]
   state.snoozed = new Set(['pv-trip'])   // a snoozed by-date target: amber → Snoozed
   state.history = [
     { id: 'pv-t1', category_id: null,      kind: 'income',  amount: 3200,  description: 'Paycheque',      occurred_on: d(1) },
     { id: 'pv-t2', category_id: 'pv-rent', kind: 'expense', amount: 1800,  description: 'Rent',           occurred_on: d(1), recurring_id: 'pv-r1' },
     { id: 'pv-t3', category_id: 'pv-groc', kind: 'expense', amount: 92.4,  description: 'Metro',          occurred_on: d(3), flag: 'green', memo: 'weekly shop' },
+    { id: 'pv-t0', category_id: 'pv-gym',  kind: 'expense', amount: 45,    description: 'Gym (cancelled)', occurred_on: d(2) },
     { id: 'pv-t4', category_id: 'pv-dine', kind: 'expense', amount: 45.25, description: 'Ramen night',    occurred_on: d(6) },
     { id: 'pv-t5', category_id: 'pv-groc', kind: 'expense', amount: 78.1,  description: 'Costco run',     occurred_on: d(9) },
     { id: 'pv-t6', category_id: 'pv-dine', kind: 'expense', amount: 52,    description: 'Pizza',          occurred_on: d(11), flag: 'red' },

@@ -856,6 +856,21 @@ dialog[open]::backdrop {
 .cat-edit input.cat-due { flex: 1 1 45%; width: auto; min-width: 0; }
 .cat-edit input.cat-group { flex: 0 0 100%; }
 .cat-edit + .cat-edit { border-top: 1px solid var(--hairline); }
+
+/* Category lifecycle (Phase 6). The reorder arrows mirror .rule-move; the note is
+   a full-width row like the group field. Archived rows collapse to a name and the
+   two actions, so they read as a list of retired things rather than more editors. */
+.cat-move { display: flex; gap: var(--s1); flex: none; }
+.cat-move .btn-quiet { min-width: 44px; min-height: 44px; padding: 0; }
+.cat-move .btn-quiet:disabled { opacity: 0.35; }
+.cat-edit input.cat-note { flex: 0 0 100%; }
+.cat-edit .cat-arch { flex: none; min-height: 44px; }
+.cat-arch-head { margin: var(--s3) 0 var(--s1); padding-top: var(--s2); border-top: 1px solid var(--hairline); }
+.cat-edit.is-archived { opacity: 0.7; }
+.cat-edit.is-archived .cat-arch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The category note in the move sheet: context above the amount, not a control. */
+.move-note { margin: 0 0 var(--s2); }
 .rec-edit { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
 .rec-edit + .rec-edit { border-top: 1px solid var(--hairline); }
 .rec-edit .body { flex: 1; min-width: 0; }

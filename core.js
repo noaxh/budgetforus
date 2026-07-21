@@ -664,5 +664,17 @@ if (location.search.includes('selftest')) {
                        { category_id: null, kind: 'expense', amount: 40,  occurred_on: '2026-07-02' }], '2026-07-01')
     .rta, 6000, 'uncategorized spending comes out of ready to assign')
 
+  // Phase 6 (archive). rollup only knows the categories it is handed, and a
+  // transaction pointing at one that is missing is dropped from every total — it
+  // does NOT fall through into uncategorized spending. That trap is exactly why
+  // app.js keeps state.cats complete and filters archived categories only at the
+  // display sites: hand rollup a filtered list instead and an archived envelope's
+  // past spending vanishes, inflating Ready to Assign by that amount.
+  const ORPHAN = [...JULY, { category_id: 'archived', kind: 'expense', amount: 400, occurred_on: '2026-07-07' }]
+  eq(rollup(CATS, A300, ORPHAN, '2026-07-01').rta, 70000,
+    'a txn in an unknown category is dropped, not folded into ready to assign')
+  eq(rollup([...CATS, { id: 'archived' }], A300, ORPHAN, '2026-07-01').cats.get('archived').available, -40000,
+    'the same txn lands in its envelope once the category is in the list')
+
   console.log('selftest ok')
 }

@@ -25,8 +25,11 @@ Roadmap: **"Roadmap v2: YNAB core, Monarch surfaces" in [NOTES.md](NOTES.md) is 
 plan** (2026-07-17). The "YNAB feature parity" audit in NOTES.md is the reference inventory
 (statuses frozen 2026-07-16); Roadmap v2 owns status and order. Already shipped: Phases A,
 B (targets engine), C (recurring cadences + auto-apply, Money Moves, bulk bar), the Spruce
-& Bone redesign, Phase D reports, the register search bar, and **Phase 1 — envelope
-finishers (2026-07-20, needs `schema-v7.sql` run + deploy)**. Remaining phases, in order:
+& Bone redesign, Phase D reports, the register search bar, and Roadmap v2 **Phases 1, 2, 3
+and 4** — all deployed, with `schema-v7/v8/v9.sql` confirmed run (REST probe 2026-07-21:
+`target_snoozes`, `rules`, `accounts`, `balance_snapshots` all present, RLS holding).
+**Phase 6 (category lifecycle) is built and needs `schema-v10.sql` run before its deploy.**
+Remaining phases, in order:
 
 1. ~~**Envelope finishers.**~~ **Shipped 2026-07-20** (`schema-v7.sql`): quick-move / cover
    overspending (tap an Available pill), focused views (filter chips over the plan,
@@ -37,15 +40,29 @@ finishers (2026-07-20, needs `schema-v7.sql` run + deploy)**. Remaining phases, 
    `rollup`/`cashFlow`/`spendingBreakdown` skip parents via `splitParentIds`), the txn
    micro-features (`memo` column, `evalAmount` calculator in every money field, duplicate,
    convert-to-recurring, add-now on a rule), and Age of Money (FIFO in `core.js`).
-2. **Home dashboard (Monarch):** landing tab with plan state, spending summary, upcoming
-   recurring, recent transactions, alert cards; hide/reorder stored locally.
-3. **Rules + recurring calendar (Monarch):** description-match rules that set category and
-   flag, retro-apply with preview, payee-memory fallback, calendar of recurring bills.
-4. **Net worth lite:** manual `accounts` + monthly `balance_snapshots`, net worth chart +
-   dashboard card. Transactions never reference accounts (decided 2026-07-17).
+2. ~~**Home dashboard (Monarch).**~~ **Shipped** — landing tab with plan state, spending
+   summary, upcoming recurring, recent transactions, alert cards; hide/reorder stored locally.
+3. ~~**Rules + recurring calendar (Monarch).**~~ **Shipped** (`schema-v8.sql`) —
+   description-match rules setting category and flag, retro-apply with preview,
+   payee-memory fallback, calendar of recurring bills.
+4. ~~**Net worth lite.**~~ **Shipped** (`schema-v9.sql`) — manual `accounts` + monthly
+   `balance_snapshots`, net worth view + dashboard card. Transactions never reference
+   accounts (decided 2026-07-17).
 5. **File import:** CSV/OFX drag-drop, column map, dedupe, categorized by the rules.
-6. **Category + plan management:** reorder, notes/icons/colors, hide/archive/merge
-   category, future-month assigning, copy/archive budget, Fresh Start.
+   Deliberately still unbuilt — the roadmap gates it on a real bank export existing.
+6. ~~**Category + plan management.**~~ **Built 2026-07-21, needs `schema-v10.sql` run
+   before deploy.** Scope was cut on the ladder, and the cuts are the interesting part:
+   - **Reorder** — `categories.sort` had existed since `schema.sql` sitting at 0 on every
+     row, never written. Wired up with up/down arrows (the `.rule-move` idiom), no drag lib,
+     no migration; the first press re-packs the whole list to its array index.
+   - **Archive** — one `archived` flag covering both "hide" and "archive"; they were the
+     same act at this scale. This is also the *correct* retirement path, since deleting a
+     category nulls `category_id` on its history and rewrites closed months.
+   - **Notes** — one column, rendered in the move sheet where the decision happens.
+   - **Cut:** emoji (type it into the name), colour (`group_name` already organizes),
+     merge (bulk-recategorize + delete does it in two steps), copy/archive budget and
+     Fresh Start (two people, one budget). Future-month assigning needed no work —
+     `goMonth` never clamped and `assign` has no month guard.
 7. **Productivity + QoL:** undo/redo, keyboard shortcuts, PWA manifest, first-run
    envelope explainer.
 
@@ -129,12 +146,16 @@ investments, forecasting, mobile native widgets, public API.
 
 ## Open items (as of 2026-07-20)
 
-- [ ] **Run `schema-v7.sql` BEFORE deploying Phase 1.** Adds `transactions.parent_id`
-      (splits), `transactions.memo`, and the `target_snoozes` table. Idempotent + guarded
-      like v3–v6. Order matters: run the SQL first, *then* push, or the live client hits
-      missing columns/tables. Paste contents into the budgetforus SQL editor (Ctrl+A first —
-      contents, not the filename). Verified locally via `?selftest` (new core assertions) and
-      `?preview` (splits, move/cover, snooze, focused views, auto-assign modes, Age of Money).
+- [ ] **Run `schema-v10.sql` BEFORE deploying Phase 6.** Adds `categories.archived` and
+      `categories.notes`. Idempotent + guarded like v3–v9. Order matters: run the SQL first,
+      *then* push, or the live client filters on a column that isn't there. Paste contents
+      into the budgetforus SQL editor (Ctrl+A first — contents, not the filename). Verified
+      locally via `?selftest` (two new rollup assertions) and `?preview` (an archived
+      category holding a past transaction).
+- [x] ~~**Run `schema-v7/v8/v9.sql`.**~~ All confirmed run 2026-07-21 by REST probe:
+      `target_snoozes`, `rules`, `accounts` and `balance_snapshots` all answer `200` with
+      `[]` on the publishable key, which is both "the table exists" and "RLS is denying
+      anonymous reads". `transactions.parent_id` and `memo` are present too.
 - [x] ~~**Run `schema-v3.sql`.**~~ Done 2026-07-16. A prior partial run had left the budget
       delete policy behind, so the plain script died on `42710` (policy already exists); an
       idempotent version ran clean and `schema-v3.sql` is now guarded (drop-if-exists /
