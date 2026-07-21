@@ -156,12 +156,15 @@ investments, forecasting, mobile native widgets, public API.
 
 ## Open items (as of 2026-07-20)
 
-- [ ] **Run `schema-v10.sql` BEFORE deploying Phase 6.** Adds `categories.archived` and
-      `categories.notes`. Idempotent + guarded like v3–v9. Order matters: run the SQL first,
-      *then* push, or the live client filters on a column that isn't there. Paste contents
-      into the budgetforus SQL editor (Ctrl+A first — contents, not the filename). Verified
-      locally via `?selftest` (two new rollup assertions) and `?preview` (an archived
-      category holding a past transaction).
+- [ ] **Run `schema-v11.sql`** (adds `budgets.currency`, CAD/USD). **Not a deploy blocker
+      this time** — the client selects `budgets.*` rather than naming `currency`, so it
+      falls back to CAD until the migration lands and the two can ship in either order.
+      Copy that pattern for future columns; naming a not-yet-existing column is what
+      turns a migration into a hard 400 on every load. Until it runs, the currency
+      chooser's *display* side still works (it is per-device localStorage); only
+      changing the budget's base currency will error.
+- [x] ~~**Run `schema-v10.sql` BEFORE deploying Phase 6.**~~ Done 2026-07-21; verified
+      by REST probe (`categories.archived`, `categories.notes` both `200`+`[]`).
 - [x] ~~**Run `schema-v7/v8/v9.sql`.**~~ All confirmed run 2026-07-21 by REST probe:
       `target_snoozes`, `rules`, `accounts` and `balance_snapshots` all answer `200` with
       `[]` on the publishable key, which is both "the table exists" and "RLS is denying

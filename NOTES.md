@@ -920,6 +920,67 @@ Old Phase I. Entirely client-side, no schema change. Verified via `?selftest`
   re-openable from the overflow menu as "How this works". An existing budget never
   sees it. This is the surface that matters for onboarding the second person.
 
+### Mobile fixes + currency — SHIPPED 2026-07-21 (`schema-v11.sql`)
+
+Noah, from screenshots on a real phone: *"the most important part is the mobile
+design since this will be almost exclusively used on mobile view."* Taken ahead of
+Phases 8–10.
+
+- **The dock appeared to change height between tabs.** It never did — the tabbar
+  is a constant 58px. The net-worth range `<select>` was `flex: none`, so it
+  claimed its longest option ("Last 24 months") in full and overflowed a 375px
+  phone by 15px. **An overflowing document grows the layout viewport, so a fixed
+  element's `bottom: 0` resolves below the visible area.** That is the whole bug:
+  a 15px horizontal overflow on one screen moved the dock on that screen. Worth
+  remembering as a class — on a phone, *any* horizontal overflow drags fixed
+  furniture with it. Verified after: document width == viewport width on all five
+  tabs, dock at exactly the viewport edge on all five.
+- **Budget rows collided.** `.cat-row` spanned the Available pill down both grid
+  rows (`"name avail" "meta avail"`), so a wide pill — `$0.00 / Needs $250.00` on
+  an underfunded target — squeezed the meta column until the Activity figure ran
+  under the pill. The pill's width is content-driven and cannot be budgeted for,
+  so Assigned/Activity now take their own full-width line. Holds at the worst case
+  found (`US$0.00 / Needs US$1,279.01`).
+- **Sheets only closed via Done.** On a phone the two gestures people try are
+  tapping outside and dragging down, and `.sheet::before` already draws an iOS
+  grabber — the app was promising a drag it never implemented. Both are now wired
+  **once over every `<dialog>`**, so a new sheet inherits them by existing; all 17
+  verified. The drag transforms `.sheet`, never the `<dialog>`, because the dialog
+  owns the open/close animation and reduced-motion pins its transform with
+  `!important`. It only begins at `scrollTop 0`, so flicking a long list scrolls
+  instead of dismissing. Sheets that reloaded on Done now reload on the `close`
+  event, so every dismissal path leaves identical state.
+- **Settings is a real screen** (it was a stub telling you to use the top bar),
+  carrying the currency controls plus routes to rename / how-it-works / what's-new
+  / sign out.
+
+**Currency is display-only, and that is the design, not a shortcut.** Amounts stay
+stored, summed and reconciled in the budget's own currency as integer cents;
+conversion happens at the very last step, when a figure becomes a string. A wrong
+or missing rate therefore cannot corrupt data — the worst case is a figure shown
+in the wrong units, never a wrong balance.
+
+- `schema-v11.sql` adds `budgets.currency` (CAD/USD) — what the stored amounts
+  *are*. Changing it **reinterprets** existing amounts rather than converting
+  them, so the client confirms it in exactly those words.
+- The **display** currency is deliberately NOT in the database. It is a per-viewer
+  reading preference in `localStorage`, never written back, which is what stops
+  one member's choice from moving what the other one sees. The money is shared;
+  the units you read it in are yours.
+- `money()` is shadowed locally in `app.js` over core's pure `formatMoney` +
+  `convertC`. That converts all 40-odd call sites without editing one of them and
+  keeps `core.js` pure.
+- Rates: **`api.frankfurter.dev`** (ECB, no key, CORS), cached per day. The older
+  `api.frankfurter.app` domain no longer resolves — it fails as `Failed to fetch`,
+  which the code reports as a rate failure rather than a crash. Every failure path
+  degrades to the real stored currency instead of a guessed number.
+- Converted figures are marked "≈": they are today's rate applied to past amounts,
+  so a converted history shifts slightly day to day. Said plainly in Settings.
+- `budgets.select()` uses `'*'` rather than naming `currency`, so **the client and
+  the migration can ship in either order.** Naming the column would hard-fail every
+  load with a 400 until the SQL ran — the migration-ordering foot-gun this project
+  keeps stepping on. Worth copying for future columns.
+
 ### Phase 8: saving together (planned 2026-07-21) — the actual point of the project
 
 Noah restated the original purpose: this was built so he and a friend could save
