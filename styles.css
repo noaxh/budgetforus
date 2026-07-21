@@ -479,10 +479,16 @@ main { display: block; }
    TOKENS  s-*, fs-body/meta/micro, tap
    .cat-meta is a flex line on phone and display:contents on wide, which is
    what lets the SAME DOM read as stacked card there and table row here. */
+/* Phone: the Available pill shares line 1 with the name, and Assigned/Activity
+   get line 2 to themselves. The pill used to span both rows ("meta avail"), so a
+   wide pill — "$0.00 / Needs $250.00" on an underfunded target — squeezed the
+   meta column until the Activity figure collided with the pill. The pill's width
+   is content-driven and can't be predicted, so give the controls their own line
+   rather than trying to budget for the worst label. */
 .cat-row {
   display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas: "name avail" "meta avail" "foot foot";
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name avail" "meta meta" "foot foot";
   align-items: center;
   column-gap: var(--s3);
   padding: var(--s3) var(--s4);
@@ -490,7 +496,10 @@ main { display: block; }
 .cat-name { grid-area: name; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cat-avail { grid-area: avail; text-align: right; }
 .cat-meta { grid-area: meta; display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-top: var(--s1); min-width: 0; }
-.cat-assigned, .cat-activity { display: flex; align-items: center; gap: var(--s2); }
+/* min-width:0 so a long figure truncates inside its own cell instead of pushing
+   the flex row wider than the card. */
+.cat-assigned, .cat-activity { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.cat-activity .num { overflow: hidden; text-overflow: ellipsis; }
 .cell-lbl { font-size: var(--fs-micro); font-weight: 700; color: var(--ink-2); margin: 0; }
 .cat-activity .num { font-size: var(--fs-meta); color: var(--ink-2); }
 input.assign { width: 104px; min-height: var(--tap); padding: 6px 10px; text-align: right; font-weight: 600; }
@@ -872,6 +881,27 @@ dialog[open]::backdrop {
 /* The category note in the move sheet: context above the amount, not a control. */
 .move-note { margin: 0 0 var(--s2); }
 
+/* ---- settings screen --------------------------------------------------------
+   KIT: a labelled row = explanation on the left, control on the right. The rows
+   wrap on narrow screens so a long explanation never squeezes the <select> into
+   an unreadable sliver — this screen is read on a phone first. */
+.set-card + .set-card { margin-top: var(--s4); }
+.set-title { font-size: var(--fs-section); font-weight: 800; margin-bottom: var(--s3); }
+.set-row {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--s3); padding: var(--s3) 0; flex-wrap: wrap;
+}
+.set-row + .set-row { border-top: 1px solid var(--hairline); }
+.set-label { display: flex; flex-direction: column; gap: 3px; flex: 1 1 190px; min-width: 0; }
+.set-label b { font-weight: 700; }
+.set-select {
+  flex: 0 0 auto; min-height: var(--tap); min-width: 96px;
+  padding: 8px 12px; font-weight: 700;
+}
+.set-fx { margin-top: var(--s3); line-height: 1.5; }
+.set-actions { display: flex; flex-direction: column; gap: var(--s2); }
+.set-actions .btn-quiet { min-height: var(--tap); justify-content: flex-start; text-align: left; }
+
 /* ---- keyboard shortcuts + first-run explainer (Phase 7) ---------------------
    Two read-only sheets. The shortcut rows are a key/label pair; <kbd> gets the
    only monospace in the app, which is the point — it reads as a key, not prose. */
@@ -938,7 +968,12 @@ dialog[open]::backdrop {
    Reuses .card; the RTA state colors (home-rta-ok/over) tint the total. */
 .nw-card { margin-top: var(--s4); }
 .nw-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
-.nw-range { flex: none; min-height: 32px; padding: 2px var(--s2); border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--paper); font-size: var(--fs-meta); font-weight: 700; color: var(--ink); }
+/* `flex: none` here used to let the <select> claim its longest option ("Last 24
+   months") in full, which overflowed a 375px phone by 15px. That horizontal
+   overflow is what displaced the fixed tabbar: an overflowing document grows the
+   layout viewport, so `bottom: 0` resolved below the visible area and the dock
+   appeared to move between tabs. Let it shrink instead. */
+.nw-range { flex: 0 1 auto; min-width: 0; max-width: 100%; min-height: 32px; padding: 2px var(--s2); border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--paper); font-size: var(--fs-meta); font-weight: 700; color: var(--ink); }
 .nw-total { display: block; font-family: var(--font-display); font-size: var(--fs-rta); font-weight: 800; line-height: 1.1; margin-top: var(--s1); }
 /* Trend: fixed-height row of bars, current month accented. */
 .nw-bars { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin-bottom: var(--s3); }

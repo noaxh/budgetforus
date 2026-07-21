@@ -11,6 +11,20 @@
 export const cents = n => Math.round(Number(n) * 100)
 export const money = c => (c / 100).toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })
 
+// Multi-currency (2026-07-21) is a DISPLAY concern only. Amounts are stored, summed
+// and reconciled in the budget's own currency as integer cents, exactly as before;
+// conversion happens at the last step, when a figure becomes a string. That keeps
+// one source of truth and means a wrong or missing rate can never corrupt data.
+//
+// Consequence worth knowing: a converted figure is today's rate applied to a past
+// amount, so a converted history shifts slightly day to day. The UI marks converted
+// figures with "≈" rather than pretending otherwise. Both stay pure — app.js holds
+// the rate and wraps these.
+export const formatMoney = (c, currency = 'CAD') =>
+  (c / 100).toLocaleString('en-CA', { style: 'currency', currency })
+
+export const convertC = (c, rate) => Math.round(c * rate)
+
 // ---------------------------------------------------------------- dates
 
 export const monthKey   = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`

@@ -196,10 +196,46 @@
     </section>
 
     <section class="screen" id="screen-settings" data-screen="settings" hidden>
-      <div class="card empty-state">
-        <span class="empty-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9"/><circle cx="17" cy="7" r="2.5"/><path d="M20 17h-9"/><circle cx="7" cy="17" r="2.5"/></svg></span>
-        <h2>Settings</h2>
-        <p>Preferences move in here eventually. Rename, hide amounts and sign out live in the top bar for now.</p>
+      <!-- Currency. Two knobs with very different scopes, and the copy has to make
+           that obvious: the budget's currency is shared data that changes what the
+           numbers ARE, while "show amounts in" is this device's reading preference
+           and changes nothing for the other person. -->
+      <div class="card set-card">
+        <h2 class="set-title">Currency</h2>
+
+        <div class="set-row">
+          <div class="set-label">
+            <b>This budget is kept in</b>
+            <span class="small muted">The currency amounts are actually stored and added up in. Shared with everyone in the budget.</span>
+          </div>
+          <select id="set-base" class="set-select" aria-label="Budget currency">
+            <option value="CAD">CAD</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+
+        <div class="set-row">
+          <div class="set-label">
+            <b>Show amounts in</b>
+            <span class="small muted">Only on this device. Your partner keeps reading in whatever they picked.</span>
+          </div>
+          <select id="set-display" class="set-select" aria-label="Display currency">
+            <option value="CAD">CAD</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+
+        <p class="small muted set-fx" id="set-fx"></p>
+      </div>
+
+      <div class="card set-card">
+        <h2 class="set-title">This budget</h2>
+        <div class="set-actions">
+          <button type="button" class="btn-quiet" id="set-rename">Rename budget</button>
+          <button type="button" class="btn-quiet" id="set-intro">How this works</button>
+          <button type="button" class="btn-quiet" id="set-changelog">What&rsquo;s new</button>
+          <button type="button" class="btn-quiet btn-danger" id="set-signout">Sign out</button>
+        </div>
       </div>
     </section>
 

@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 import {
-  cents, money, monthKey, monthStart, monthEnd, monthLabel, today,
+  cents, formatMoney, convertC, monthKey, monthStart, monthEnd, monthLabel, today,
   prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, txnMatches, rollup, recurringOccurrences,
   splitParentIds, distributeSplit, evalAmount, ageOfMoney,
   matchRule, lastCategoryFor, retroApply,
@@ -18,8 +18,35 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], rules: [], accounts: [], snapshots: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null, undo: null }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], rules: [], accounts: [], snapshots: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null, undo: null,
+  // base = what the budget's amounts ARE; display = what this device reads them in;
+  // rate 1 means no conversion (same currency, or no rate available).
+  fx: { base: 'CAD', display: 'CAD', rate: 1, at: null, stale: false, failed: false } }
 const $ = id => document.getElementById(id)
+
+// ---- currency (2026-07-21). The budget stores one currency; each *device* picks
+// what to read amounts in. Noah banks in CAD and his friend may read in USD, so
+// this is a per-viewer preference, not budget data — it lives in localStorage and
+// is never written back, which also means one person switching can't move the
+// other person's numbers.
+//
+// `money()` shadows core's export deliberately: it is the single place a figure
+// becomes a string, so wrapping it converts all 40-odd call sites at once without
+// touching one of them. Everything upstream stays integer cents in the base
+// currency.
+const FX_KEY = 'budget.display-currency'
+const FX_CACHE = 'budget.fx-rate'
+const CURRENCIES = ['CAD', 'USD']
+
+const money = c =>
+  state.fx.rate === 1
+    ? formatMoney(c, state.fx.base)
+    : formatMoney(convertC(c, state.fx.rate), state.fx.display)
+
+// A converted figure is an estimate at today's rate, so it is marked. Callers that
+// show a headline number use this to append "≈" rather than implying precision the
+// rate can't support.
+const isConverted = () => state.fx.rate !== 1
 
 // One rollup for the whole app, snooze-aware. Every screen and action reads the
 // same numbers, so the four states and Ready to Assign never disagree between
@@ -38,10 +65,59 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': 
 // ---------------------------------------------------------------- data
 
 async function loadBudgets() {
-  const { data, error } = await sb.from('budgets').select('id,name').order('name')
+  // select('*'), not an explicit column list: naming `currency` here would make the
+  // client hard-fail with a 400 on every load until schema-v11 runs, which is the
+  // migration-ordering foot-gun this project keeps stepping on. With `*` the column
+  // is simply absent until the migration lands and `currency` falls back to CAD, so
+  // the client and the migration can ship in either order.
+  const { data, error } = await sb.from('budgets').select('*').order('name')
   if (error) return fail(error)
   state.budgets = data ?? []
   if (!state.budgets.some(b => b.id === state.budgetId)) state.budgetId = state.budgets[0]?.id ?? null
+  await refreshFx()
+}
+
+// Resolve the pair (what this budget stores, what this device wants to read) into
+// a rate. Same currency is the common case and costs nothing.
+//
+// Rates come from frankfurter.app: ECB reference data, no key, CORS-enabled, and
+// cached for the day — a budget is not a trading desk, and a rate that moves while
+// you read the screen would be worse than one that's a few hours old. Every failure
+// path degrades to showing the real stored currency rather than a guessed number,
+// because a wrong figure is worse than an unconverted one in an app about money.
+async function refreshFx() {
+  const base = state.budgets.find(b => b.id === state.budgetId)?.currency || 'CAD'
+  const display = localStorage.getItem(FX_KEY) || base
+  const fx = { base, display, rate: 1, at: null, stale: false, failed: false }
+  if (display === base || !CURRENCIES.includes(display)) { state.fx = fx; return }
+
+  const pair = `${base}-${display}`
+  const day = today()
+  let cached = null
+  try { cached = JSON.parse(localStorage.getItem(FX_CACHE) || 'null') } catch { cached = null }
+  if (cached?.pair === pair && cached.day === day) {
+    state.fx = { ...fx, rate: cached.rate, at: cached.at || cached.day }
+    return
+  }
+  try {
+    // frankfurter.dev, not the older frankfurter.app — that domain no longer
+    // resolves. `date` is the rate's own publication date (ECB publishes on
+    // weekdays), which is what we show; it is not always today.
+    const res = await fetch(`https://api.frankfurter.dev/v1/latest?base=${base}&symbols=${display}`)
+    const json = await res.json()
+    const rate = json?.rates?.[display]
+    if (!(rate > 0)) throw new Error('no rate for ' + pair)
+    const at = json.date || day
+    localStorage.setItem(FX_CACHE, JSON.stringify({ pair, day, rate, at }))
+    state.fx = { ...fx, rate, at }
+  } catch (e) {
+    console.warn('fx lookup failed', e)
+    // Yesterday's rate is fine and is labelled as such; no rate at all means we
+    // show the stored currency untouched rather than invent one.
+    state.fx = cached?.pair === pair
+      ? { ...fx, rate: cached.rate, at: cached.at || cached.day, stale: true }
+      : { ...fx, display: base, rate: 1, failed: true }
+  }
 }
 
 async function loadMonth() {
@@ -610,6 +686,8 @@ function render() {
   $('home-cards').innerHTML = homeHtml.length
     ? homeHtml.join('')
     : '<div class="empty">Nothing to show yet. Log a transaction, or open the Budget tab.</div>'
+
+  renderSettings()
 }
 
 async function refresh() {
@@ -856,11 +934,124 @@ $('menu-dialog').onclick = e => {
   if (e.target === e.currentTarget || e.target.closest('.menu-item')) $('menu-dialog').close()
 }
 
+// ---- settings screen (2026-07-21)
+//
+// Two currency knobs with deliberately different scopes: the budget's currency is
+// shared data (it changes what the stored numbers mean, for both people), while
+// "show amounts in" is this device's reading preference and writes nothing to the
+// server. Changing the base is therefore confirmed and the display is not.
+function renderSettings() {
+  const { base, display, rate, at, stale, failed } = state.fx
+  $('set-base').value = base
+  $('set-display').value = display
+  const el = $('set-fx')
+  if (failed) {
+    el.textContent = `Couldn't fetch an exchange rate, so amounts are shown in ${base} as stored. Check your connection and reopen Settings.`
+  } else if (rate === 1) {
+    el.textContent = `Amounts are shown exactly as stored. Pick a different display currency to convert them.`
+  } else {
+    el.textContent = `1 ${base} = ${rate.toFixed(4)} ${display} · rate from ${at}${stale ? " (couldn't refresh today, using the last one)" : ''}. Converted figures are marked “≈” — they're today's rate applied to past amounts, so they shift a little day to day. Everything is still stored and added up in ${base}.`
+  }
+}
+
+// Display currency: this device only, so no confirm and no server write.
+$('set-display').onchange = async e => {
+  localStorage.setItem(FX_KEY, e.target.value)
+  await refreshFx()
+  renderSettings()
+  render()
+}
+
+// Base currency: shared, and it reinterprets every existing amount rather than
+// converting them, so it is confirmed in those words.
+$('set-base').onchange = async e => {
+  const next = e.target.value
+  const prev = state.fx.base
+  if (next === prev) return
+  const ok = confirm(
+    `Keep this budget in ${next}?\n\nThis does NOT convert anything. Every amount already recorded stays the same number and is simply read as ${next} from now on — for both of you. Only do this if the budget was really in ${next} all along.`)
+  if (!ok) { e.target.value = prev; return }
+  const { error } = await sb.from('budgets').update({ currency: next }).eq('id', state.budgetId)
+  if (error) { e.target.value = prev; return fail(error) }
+  await loadBudgets()
+  renderSettings()
+  render()
+}
+
+// The rest of Settings just routes to sheets that already exist.
+$('set-rename').onclick = () => $('rename-budget').click()
+$('set-intro').onclick = () => $('intro-dialog').showModal()
+$('set-changelog').onclick = () => { renderChangelog(); $('changelog-dialog').showModal() }
+$('set-signout').onclick = () => $('signout').click()
+
+// ---- sheet dismissal, for every dialog at once.
+//
+// This is a phone app, and most sheets only closed via their Done button — so the
+// two gestures people actually try, tapping the dimmed backdrop and dragging the
+// sheet down, did nothing. `.sheet::before` even draws an iOS grabber, promising a
+// drag the app never implemented. Wire both once over every <dialog> rather than
+// per sheet, so a new sheet inherits the behaviour by existing.
+//
+// The backdrop is the <dialog> itself (the .sheet child covers everything else),
+// so `e.target === dlg` means the tap missed the sheet. The drag transforms
+// `.sheet`, never the <dialog>: the dialog owns the open/close slide animation and
+// reduced-motion pins its transform with !important, which would fight an inline
+// style. `.sheet` is also the scroller, so a drag only starts at scrollTop 0 —
+// otherwise flicking a long list (Categories, the register) would dismiss instead
+// of scroll.
+for (const dlg of document.querySelectorAll('dialog')) {
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close() })
+
+  const sheet = dlg.querySelector('.sheet')
+  if (!sheet) continue
+  const DISMISS_PX = 90            // past this, let go and it closes
+  let startY = null, dy = 0
+  const settle = () => { sheet.style.transition = ''; sheet.style.transform = '' }
+
+  sheet.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || sheet.scrollTop > 0) return
+    startY = e.touches[0].clientY
+    dy = 0
+    sheet.style.transition = 'none'
+  }, { passive: true })
+
+  sheet.addEventListener('touchmove', e => {
+    if (startY == null) return
+    dy = e.touches[0].clientY - startY
+    // Downward only, and with resistance, so the sheet feels attached to the
+    // finger rather than thrown.
+    sheet.style.transform = dy > 0 ? `translateY(${dy * 0.9}px)` : ''
+  }, { passive: true })
+
+  sheet.addEventListener('touchend', () => {
+    if (startY == null) return
+    const dismissed = dy > DISMISS_PX
+    startY = null; dy = 0
+    if (dismissed) { settle(); dlg.close(); return }
+    sheet.style.transition = 'transform 160ms var(--ease-out)'
+    sheet.style.transform = ''
+    sheet.addEventListener('transitionend', settle, { once: true })
+  })
+  sheet.addEventListener('touchcancel', () => { startY = null; dy = 0; settle() })
+}
+
+// Sheets that used to reload on their Done button now reload on *any* close, so a
+// backdrop tap or a swipe leaves the same state behind as pressing Done.
+for (const id of ['cat-dialog', 'rec-dialog', 'rules-dialog', 'cal-dialog', 'balances-dialog']) {
+  $(id).addEventListener('close', () => refresh())
+}
+
 // ---- changelog: a static, user-facing list of what shipped, newest first.
 // ponytail: a hardcoded array, not a table or a fetched file — it only changes
 // when we ship, which is when this file changes anyway. Add a "new since you last
 // looked" dot (localStorage last-seen date) if discoverability ever needs it.
 const CHANGELOG = [
+  ['2026-07-21', 'Phone fixes, and currencies', [
+    'Fixed the bottom bar drifting on the Reflect tab — a too-wide control was pushing the page sideways.',
+    'Fixed the budget rows on narrow phones: the Available pill no longer collides with Assigned and Activity.',
+    'Every sheet now closes by tapping outside it or swiping it down, not just by pressing Done.',
+    'A real Settings tab, with a currency chooser. Pick CAD or USD and amounts convert for you — your partner keeps reading in whatever they chose. Converted figures are marked “≈”, and everything is still stored in the budget’s own currency.'
+  ]],
   ['2026-07-21', 'Install it, and undo things', [
     'Add Budget to your home screen — it opens without browser chrome, like an app. (It still needs a connection: your money should never be a stale cached number.)',
     'Changed an assignment by mistake? An Undo appears above the plan. If the other person has touched that category since, it tells you instead of overwriting them.',
@@ -1479,7 +1670,9 @@ $('txn-recur').onclick = async () => {
 // ---------------------------------------------------------------- categories
 
 $('manage-cats').onclick = () => { renderCats(); $('cat-dialog').showModal() }
-$('cat-done').onclick = () => { $('cat-dialog').close(); refresh() }
+// Done only closes; the dialog's `close` listener does the reload, so a backdrop
+// tap and a swipe-down land in exactly the same state. Same for the four below.
+$('cat-done').onclick = () => $('cat-dialog').close()
 
 function renderCats() {
   const kindOpts = k => [['', 'No target'], ['monthly', 'Monthly refill'], ['by_date', 'By date']]
@@ -1622,7 +1815,7 @@ $('manage-rec').onclick = () => {
   renderRec()
   $('rec-dialog').showModal()
 }
-$('rec-done').onclick = () => { $('rec-dialog').close(); refresh() }
+$('rec-done').onclick = () => $('rec-dialog').close()
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const cadenceLabel = r =>
@@ -1725,7 +1918,7 @@ $('manage-rules').onclick = () => {
   renderRules()
   $('rules-dialog').showModal()
 }
-$('rules-done').onclick = () => { $('rules-dialog').close(); refresh() }
+$('rules-done').onclick = () => $('rules-dialog').close()
 
 function renderRules() {
   $('rules-list').innerHTML = state.rules.length ? state.rules.map((r, i) => `
@@ -1819,7 +2012,7 @@ $('rules-commit').onclick = async () => {
 
 const WEEKDAY_ABBR = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 $('manage-cal').onclick = () => { renderCalendar(); $('cal-dialog').showModal() }
-$('cal-done').onclick = () => { $('cal-dialog').close(); refresh() }
+$('cal-done').onclick = () => $('cal-dialog').close()
 
 // Month grid of recurring occurrences with paid/pending state. paid = a txn for
 // that rule+date already exists this month; pending days are tappable to add-now.
@@ -1932,8 +2125,7 @@ function openBalances() {
   renderBalances()
   $('balances-dialog').showModal()
 }
-$('bal-done').onclick = () => { $('balances-dialog').close(); refresh() }
-$('balances-dialog').onclick = e => { if (e.target === $('balances-dialog')) { $('balances-dialog').close(); refresh() } }
+$('bal-done').onclick = () => $('balances-dialog').close()
 
 function renderBalances() {
   const ms = monthStart(state.month)
