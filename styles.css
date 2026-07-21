@@ -399,8 +399,12 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
    TOKENS  glass, tabbar-h, tap, brand, ink-2, fs-micro
    OPUS: a new tab = one .tab button here + one .screen section + one line in
    app.js SCREENS. Icons are inline SVG, stroke currentColor, 24×24. */
+/* Phone: the last row of the #app flex column, not an overlay. `flex: none` plus
+   the safe-area padding keeps its height constant, and because it is in normal
+   flow it cannot be moved by document scroll or by iOS's collapsing URL bar. */
 .tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+  position: static; z-index: 15;
+  flex: 0 0 auto;
   display: grid; grid-template-columns: repeat(5, 1fr);
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
@@ -423,11 +427,35 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
    body[data-tab]. Content column centers at --maxw.
    MARKUP  <section class="screen" id="screen-budget" data-screen="budget">…
    TOKENS  maxw, tabbar-h */
-main { display: block; }
+/* ---- app shell (phone) ------------------------------------------------------
+   The dock is NOT fixed to the viewport on phones — it is the last row of a
+   fixed-height flex column, and `main` scrolls inside it.
+
+   Why: a `position: fixed` bottom bar is positioned against the *layout*
+   viewport, which on iOS does not match what you can see. As the URL bar
+   collapses and expands the visible area changes underneath it, so the bar
+   appears to shift — and because each tab is a different length (Home ~1120px,
+   Budget ~1800px here), switching tabs changes the scroll/toolbar state and the
+   bar moves. Making the shell own its own height means document scrolling never
+   touches the dock: there is nothing for the toolbar to push around.
+
+   100dvh (dynamic viewport height) is the unit that already accounts for the
+   collapsing browser chrome; the fallback keeps older engines sane. */
+#app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+#app > .appbar { flex: 0 0 auto; position: static; }   /* no longer needs sticky: it is a flex row that never scrolls */
+main {
+  flex: 1 1 auto;
+  min-height: 0;               /* without this a flex child refuses to shrink and the column overflows */
+  overflow-y: auto;
+  overscroll-behavior: contain; /* no rubber-banding the shell behind the list */
+  -webkit-overflow-scrolling: touch;
+}
 .screen {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: var(--s4) var(--s4) calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 88px);
+  /* Only the FAB has to be cleared now — the dock is a sibling row, not an
+     overlay, so the old tabbar-height allowance would be dead space. */
+  padding: var(--s4) var(--s4) 88px;
 }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin: var(--s6) 0 var(--s2); }
 .section-head:first-child { margin-top: 0; }
@@ -1193,7 +1221,15 @@ body:not([data-tab="budget"]):not([data-tab="accounts"]):not([data-tab="reflect"
 /* ≥768px: the SAME five-tab nav becomes a fixed left sidebar; content shifts
    right; the Budget screen becomes table + Inspector rail. No second DOM. */
 @media (min-width: 768px) {
+  /* Undo the phone app-shell. Wide screens have no collapsing browser chrome to
+     defend against, the nav is a fixed sidebar rather than a bottom row, and the
+     document scrolls normally — so hand height back to the page. */
+  #app { height: auto; display: block; overflow: visible; }
+  #app > .appbar { position: sticky; }
+  main { overflow-y: visible; min-height: 0; }
+
   .tabbar {
+    position: fixed; left: 0;
     top: 0; right: auto; bottom: 0;
     width: var(--sidebar-w);
     grid-template-columns: 1fr;

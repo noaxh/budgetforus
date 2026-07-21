@@ -768,6 +768,14 @@ function switchTab(tab) {
     if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page')
     else b.removeAttribute('aria-current')
   }
+  // Start each section at the top. Screens are wildly different lengths, so
+  // carrying the previous tab's scroll offset lands you mid-list in the new one —
+  // and on iOS a retained offset also decides whether the URL bar is collapsed,
+  // which is half of why the dock looked like it moved between tabs.
+  // `main` is the scroller on phones; the document is on desktop. Reset both
+  // rather than branch on a breakpoint.
+  $('budget-view')?.scrollTo({ top: 0 })
+  scrollTo({ top: 0 })
   if (location.hash !== '#' + tab) history.replaceState(null, '', '#' + tab)
 }
 document.querySelector('.tabbar').onclick = e => {
