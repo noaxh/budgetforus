@@ -795,6 +795,11 @@ $('menu-dialog').onclick = e => {
 // when we ship, which is when this file changes anyway. Add a "new since you last
 // looked" dot (localStorage last-seen date) if discoverability ever needs it.
 const CHANGELOG = [
+  ['2026-07-21', 'Tidying your categories', [
+    'Put categories in the order you want them with the arrows in Categories.',
+    'Archive a category you’re done with: it leaves the plan and the pickers, but its past spending stays in your history and your reports. Deleting still doesn’t — archive is the safe way to retire one.',
+    'Give a category a note — why it exists, what it’s for. It shows when you tap its Available.'
+  ]],
   ['2026-07-20', 'Net worth', [
     'Track accounts — what you own and what you owe — and type in their balances month by month.',
     'A net worth card on Reflect: total, per-account breakdown and a trend over 6, 12 or 24 months.',
