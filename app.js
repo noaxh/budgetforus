@@ -787,6 +787,11 @@ $('menu-dialog').onclick = e => {
 // when we ship, which is when this file changes anyway. Add a "new since you last
 // looked" dot (localStorage last-seen date) if discoverability ever needs it.
 const CHANGELOG = [
+  ['2026-07-20', 'Net worth', [
+    'Track accounts — what you own and what you owe — and type in their balances month by month.',
+    'A net worth card on Reflect: total, per-account breakdown and a trend over 6, 12 or 24 months.',
+    'A matching card on Home showing this month’s change.'
+  ]],
   ['2026-07-20', 'Rules & recurring calendar', [
     'Rules auto-fill a category (and flag) from what a transaction’s description contains.',
     'Payee memory: a new transaction reuses the last category you gave that payee.',
