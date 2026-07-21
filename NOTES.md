@@ -920,6 +920,89 @@ Old Phase I. Entirely client-side, no schema change. Verified via `?selftest`
   re-openable from the overflow menu as "How this works". An existing budget never
   sees it. This is the surface that matters for onboarding the second person.
 
+### Phase 8: saving together (planned 2026-07-21) — the actual point of the project
+
+Noah restated the original purpose: this was built so he and a friend could save
+together to afford trips. Seven phases of YNAB/Monarch parity drifted away from
+that. This phase aims the app back at it.
+
+**Premise correction, because most of it already exists and is simply never
+shown:**
+
+- `transactions.created_by` has been recorded since v1 (`schema.sql`), defaults to
+  `auth.uid()`, and the insert policy is `created_by = auth.uid()` — so the
+  database *enforces* that neither person can attribute a transaction to the
+  other. Contribution history is already truthful and already fetched by the
+  client's `select('*')`. Nothing renders it.
+- Savings goals already exist: `target_kind = 'by_date'` with `targetNeeded` =
+  `remaining / monthsLeft`, and Available rolls forward cumulatively instead of
+  resetting monthly. A trip fund is a by-date category. It is presented as a row
+  in a budget table rather than as a goal, which is why it doesn't feel like one.
+- The joint pot balance already exists: "Cash on hand" is income minus expenses
+  across loaded history.
+- A shared budget already exists: a second `budgets` row with both people in
+  `budget_members`. No code needed.
+
+So the gap is presentation plus identity, not model.
+
+**Decisions locked 2026-07-21 (Noah's calls):**
+
+1. **Separate personal bank accounts**, with each person allocating portions into
+   a joint account for joint expenses and trip saving.
+2. **Trip saving lives in its own shared budget**, separate from personal
+   budgets. Works today; no build.
+3. **Fairness is "whatever each can contribute."** No split targets, no owed
+   amounts, no settle-up. Show the total and who put in what, without judgement.
+
+Decision 3 is the big simplifier: it deletes the entire debt/settlement
+subsystem a joint-expense app would normally need. Do not build it back in.
+
+**Model mapping — no new concepts, existing pieces renamed in the UI:**
+
+| Real life | Already is |
+|---|---|
+| "I moved $300 into the joint account" | an income transaction, `created_by` = you |
+| Joint pot balance | Cash on hand (income − expenses) |
+| Joint money not yet allocated | Ready to Assign |
+| A trip we're saving for | a `by_date` category (amount + date) |
+| Progress toward the trip | that category's Available vs target |
+| Spending while on the trip | expenses against the category |
+
+**Items:**
+
+- **8.1 Who's who (S).** `schema-v11.sql`: `budget_members.display_name text`
+  (≤40, nullable). Capture `session.user.id` into state — `onAuthStateChange`
+  already receives the session, so it's one line. Names fall back to "You" and
+  "Partner". ponytail: **not** a `profiles` table with an `auth.users` trigger —
+  one column on a table both members can already read (the `read co-members`
+  policy exists), because at two people a per-membership name is indistinguishable
+  from a per-person one.
+- **8.2 `contributions()` (S).** Pure + selftested in `core.js`: fold history into
+  per-person income totals (and expenses paid, for context), skipping split
+  parents like every other consumer, returning rows sorted desc plus a total. An
+  unrecognised `created_by` reads as "Someone" rather than throwing — a member
+  could be removed while their transactions remain.
+- **8.3 Goal cards (M).** Render by-date categories as goals rather than rows:
+  name, saved vs target, a progress bar, months left, on-track state (reuse
+  `envStatus`), and the contributor split underneath. Surfaces: a "Shared goals"
+  card in the Home stack (which already supports hide/reorder) and the same block
+  on Reflect for the fuller view. Reuses the `.breakdown` bar styling.
+- **8.4 Log a contribution (S).** A shortcut opening the transaction sheet
+  pre-set to income, so "I put in $300" is two taps rather than choosing kind and
+  category every time.
+- **8.5 Reconcile chip (S) — DEFERRED, build only if the joint account is real.**
+  Nominate a Phase 4 account and compare its latest snapshot against computed cash
+  on hand; show "matches" or "off by $X". Worth it only when there is a real bank
+  balance to drift from.
+
+**The one rule this design needs written down.** Contributions are income into
+the joint pot, and joint expenses are paid *from* the joint pot. If one person
+fronts a joint cost out of their own pocket, log it as a contribution *and* an
+expense — otherwise you are back to who-owes-whom, which decision 3 cut.
+
+**Order:** 8.1, 8.2, 8.3, 8.4. One migration, one new pure function, the rest is
+presentation over data that already exists.
+
 ### Parked (unscheduled, revisit on real demand)
 
 - Loan/debt calculator. Self-contained client math; build it the day a real
