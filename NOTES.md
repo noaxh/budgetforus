@@ -964,9 +964,35 @@ subsystem a joint-expense app would normally need. Do not build it back in.
 | "I moved $300 into the joint account" | an income transaction, `created_by` = you |
 | Joint pot balance | Cash on hand (income − expenses) |
 | Joint money not yet allocated | Ready to Assign |
-| A trip we're saving for | a `by_date` category (amount + date) |
+| A trip we're saving for | a `balance` category (amount, no date) — see 8.0 |
 | Progress toward the trip | that category's Available vs target |
 | Spending while on the trip | expenses against the category |
+
+- **8.0 Static savings — `target_kind = 'balance'` (S). CORRECTS AN EARLIER
+  MISTAKE IN THIS PLAN.** The first draft said a trip is a `by_date` category.
+  Noah: *"joint savings won't be monthly, instead will be static as it is a
+  savings account system."* He's right, and `by_date` is the wrong kind: it
+  computes `remaining / monthsLeft`, which demands a slice **every month** and
+  turns the envelope amber when that slice isn't funded. That is monthly-budget
+  pressure applied to a savings pot, which is exactly what he doesn't want.
+
+  A savings goal is YNAB's "have a balance of X": a target amount with **no
+  pacing and no deadline**. You put money in when you have it; the pot never nags.
+
+  **No migration.** `schema-v5.sql` already permits `'balance'` in the
+  `categories_target_kind_check` constraint — the schema anticipated this kind and
+  the client never offered it. The build is:
+  - `targetNeeded`: `case 'balance': return 0` — never needed *this month*, so
+    `envStatus` never goes amber, Cost to Be Me (a monthly figure) correctly
+    ignores it, and the fund-to-target auto-assign correctly skips it rather than
+    dumping every spare dollar into savings.
+  - Progress is `available / monthly_limit`, shown as the Phase 9 ring. The
+    "Overfunded" focused view already reads `available > monthly_limit`, which for
+    a balance target means *goal reached* — a happy state, not a warning, so it
+    needs a different label in this context.
+  - Column naming note: `monthly_limit` has meant "target amount" since Phase B
+    for every kind except `monthly`. It is a bad name and stays — renaming costs a
+    migration and a sweep for a word.
 
 **Items:**
 
@@ -1000,8 +1026,8 @@ the joint pot, and joint expenses are paid *from* the joint pot. If one person
 fronts a joint cost out of their own pocket, log it as a contribution *and* an
 expense — otherwise you are back to who-owes-whom, which decision 3 cut.
 
-**Order:** 8.1, 8.2, 8.3, 8.4. One migration, one new pure function, the rest is
-presentation over data that already exists.
+**Order:** 8.0, 8.1, 8.2, 8.3, 8.4. One migration (8.1 only — 8.0 needs none),
+one new pure function, the rest is presentation over data that already exists.
 
 ### Phase 9: charts and the visual language (planned 2026-07-21)
 
@@ -1087,14 +1113,70 @@ report people actually look at), then the net-worth line, then income vs expense
 then sparklines. Sequenced after Phase 8's `contributions()` exists, since the
 contribution bar depends on it.
 
+### Phase 10: the recap calendar (planned 2026-07-21)
+
+Noah: *"a calendar build where you can view months recap stats."* Monarch's
+monthly review, with a calendar as the way in.
+
+**Not to be confused with the calendar that already exists.** Phase 3 shipped a
+recurring-bills calendar (`renderCalendar`, `#cal-grid`): a day grid for one
+month with paid/pending dots. This is a different surface with a different job —
+that one answers *"what's due?"*, this one answers *"how did we do?"*. The grid
+CSS is worth reusing; the content is not.
+
+**The finding that makes this cheap: no new queries.** `state.history` already
+holds every transaction up to the viewed month's end (the client deliberately
+fetches whole history and sums in the browser), and assignments are fetched
+`.lte('month', ms)`. So every past month's recap is computable from data already
+in memory. This phase adds no fetching, no schema, and no migration — it is pure
+functions over state plus presentation.
+
+**Two levels, because "view months" and "recap stats" are different jobs:**
+
+- **10.1 Year grid (M).** Twelve month tiles for the year containing the viewed
+  month, each showing that month's net (income − expense) and a bar sized to it.
+  Net is a polarity job, so it takes the **diverging** pair (surplus one pole,
+  deficit the other, neutral gray at zero) — not the status green/red, which mean
+  funded/overspent and are reserved. Tapping a tile jumps the whole app to that
+  month, so this doubles as the month picker the app currently lacks (today you
+  step one month at a time with the chevrons or `[` / `]`).
+- **10.2 Month recap (M).** The detail behind a tile: money in, money out, net,
+  how much went into savings goals, the top-3 spending donut from Phase 9, the
+  single biggest expense, and each figure's delta against the previous month.
+  Everything here is assembled from functions that already exist and are already
+  selftested — `cashFlow`, `spendingBreakdown`, `sumSpentInRange`, `rollup` — so
+  the new pure code is one `monthRecap(history, assigns, cats, ms)` that gathers
+  them into one object, plus its selftest.
+
+**Deliberately not built:**
+
+- **A day-grid heatmap of daily spending.** Tempting and pretty, but at two people
+  and a few transactions a week most cells are empty, so it would be a mostly
+  blank grid dressed up as a data visualisation. Revisit if the transaction volume
+  ever justifies it.
+- **Multi-year navigation.** The year grid shows the viewed month's year. A budget
+  that is a few months old does not need a decade picker.
+- **Any new persistence.** A recap is derived, never stored. Storing it would
+  create a second source of truth that drifts from the transactions.
+
+**Ceiling worth writing down.** Recaps only cover months *at or before* the viewed
+month, because the history fetch is bounded by `monthEnd(state.month)`. Stepping
+back to January and opening the year grid will show later months as empty rather
+than as data. Either accept it (the recap is a look *backwards*) or widen the
+fetch — do not half-fix it by showing blank tiles that look like zero spending.
+
+**Order:** 10.1 then 10.2, after Phase 9's donut exists (10.2 uses it).
+
 ### Parked (unscheduled, revisit on real demand)
 
 - Loan/debt calculator. Self-contained client math; build it the day a real
   loan needs planning.
 - Real payees table (rename / merge / hide), only if datalist + rules prove
   too loose.
-- Richer target kinds (weekly, set-aside-another, have-a-balance-of,
+- Richer target kinds (weekly, set-aside-another,
   pay-specific-amount). Monthly refill + by-date cover real use so far.
+  ~~have-a-balance-of~~ left this list 2026-07-21: it is Phase 8.0, because a
+  joint savings pot is static and must not be paced monthly.
 - Realtime sync channel, only if simultaneous editing actually happens.
 - Offline / service worker.
 
