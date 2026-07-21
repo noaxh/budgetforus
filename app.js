@@ -697,6 +697,86 @@ async function refresh() {
   maybeIntro()
 }
 
+// ---- ?vp — viewport diagnostic (2026-07-21)
+//
+// The dock sat above the bottom of the screen on a real iPhone and nowhere else:
+// not in desktop responsive mode, not in the headless browser. Rather than guess a
+// third time, this prints the numbers that actually decide where the bottom of the
+// page is, on the device showing the problem. Load /?vp and screenshot it.
+//
+// The question it answers: is the gap OUR layout (the shell is shorter than the
+// visible area) or the BROWSER's chrome (Safari's bottom toolbar, which a page
+// cannot draw under)? `dockGapToViewport` near 0 with `innerH` well under
+// `screenH` means the shell is doing its job and the space belongs to Safari.
+if (new URLSearchParams(location.search).has('vp')) {
+  const probe = unit => {
+    const el = document.createElement('div')
+    el.style.cssText = `position:fixed;top:0;left:0;width:1px;height:100${unit};visibility:hidden;pointer-events:none`
+    document.body.appendChild(el)
+    const h = el.getBoundingClientRect().height
+    el.remove()
+    return Math.round(h)
+  }
+  const envPx = side => {
+    const el = document.createElement('div')
+    el.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;height:env(safe-area-inset-${side})`
+    document.body.appendChild(el)
+    const h = el.getBoundingClientRect().height
+    el.remove()
+    return Math.round(h)
+  }
+  const show = () => {
+    const bar = document.querySelector('.tabbar')
+    const r = bar ? bar.getBoundingClientRect() : null
+    const vv = window.visualViewport
+    const rows = {
+      'screen.height': screen.height,
+      'window.innerHeight': innerHeight,
+      'visualViewport.height': vv ? Math.round(vv.height) : 'n/a',
+      'visualViewport.offsetTop': vv ? Math.round(vv.offsetTop) : 'n/a',
+      '100vh': probe('vh'), '100svh': probe('svh'),
+      '100lvh': probe('lvh'), '100dvh': probe('dvh'),
+      'safe-area-bottom': envPx('bottom'),
+      'safe-area-top': envPx('top'),
+      '#app height': Math.round($('app').getBoundingClientRect().height),
+      'dock height': r ? Math.round(r.height) : 'n/a',
+      'dock padBottom': bar ? getComputedStyle(bar).paddingBottom : 'n/a',
+      // If the icons sit far above the bar's own bottom edge, the safe-area
+      // allowance is being added while Safari's toolbar already occupies that
+      // space — that would read as "the dock is above the bottom" even though the
+      // bar itself is flush.
+      'icons→barBottom': (() => {
+        const icon = bar?.querySelector('.tab')
+        return icon && r ? Math.round(r.bottom - icon.getBoundingClientRect().bottom) : 'n/a'
+      })(),
+      'dock bottom': r ? Math.round(r.bottom) : 'no dock',
+      'dockGapToViewport': r ? Math.round(innerHeight - r.bottom) : 'n/a',
+      'dockGapToVisualVP': r && vv ? Math.round(vv.height - r.bottom) : 'n/a',
+      'standalone PWA': (matchMedia('(display-mode: standalone)').matches || navigator.standalone) ? 'YES' : 'no',
+      'docScrolls': document.documentElement.scrollHeight > document.documentElement.clientHeight
+    }
+    let box = $('vp-box')
+    if (!box) {
+      box = document.createElement('pre')
+      box.id = 'vp-box'
+      box.style.cssText = 'position:fixed;inset:0;z-index:9999;margin:0;padding:16px;' +
+        'background:#101617;color:#D8F3F0;font:12px/1.7 ui-monospace,Menlo,monospace;' +
+        'white-space:pre-wrap;overflow:auto'
+      document.body.appendChild(box)
+    }
+    box.textContent = 'VIEWPORT DIAGNOSTIC — screenshot this\n\n' +
+      Object.entries(rows).map(([k, v]) => k.padEnd(24) + v).join('\n') +
+      '\n\nIf dockGapToViewport is ~0, the shell is correct and the empty space\n' +
+      'below is Safari\'s own toolbar — a page cannot draw under it.\n' +
+      'If it is a large number, the bug is ours.\n\nTap to refresh.'
+  }
+  addEventListener('load', show)
+  addEventListener('resize', show)
+  visualViewport?.addEventListener('resize', show)
+  addEventListener('click', show)
+  setTimeout(show, 300)
+}
+
 // ---- first-run explainer (Phase 7). The envelope model is the thing people
 // bounce off, so say it once before the empty plan rather than letting someone
 // guess what Ready to Assign wants from them. Fires only on a budget with no
