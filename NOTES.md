@@ -871,14 +871,54 @@ record here:
   budget; delete-budget already exists. Speculative until someone wants a second
   budget for real.
 
-### Phase 7: productivity + QoL
+### Phase 7: productivity + QoL — BUILT 2026-07-21 (no migration)
 
-Old Phase I. Opportunistic.
+Old Phase I. Entirely client-side, no schema change. Verified via `?selftest`
+(five new `undoStomped` assertions) and `?preview` at 375px.
 
-- Undo/redo (M). Action stack over assignment and transaction edits.
-- Keyboard shortcuts (S). Desktop: assign, next category, new transaction.
-- PWA manifest + icons (S). Installable; still no service worker.
-- First-run envelope explainer (S). The model is where people bounce off.
+- Undo/redo (M). **Built narrow, and the narrowing is the decision.** Not an
+  action stack: one level, this session only, assignments only. The inverse of
+  the last `assign()` batch is kept in `state.undo` (sourced from the Money Moves
+  rows that call already computes, so there is no new table and no extra fetch),
+  offered as a banner above the plan, and dropped on a month or budget change.
+  One Undo covers a whole batch, so an auto-assign run reverses in one press.
+
+  **Redo: cut.** Undoing an assignment leaves the figure on screen and typing it
+  again is the redo. A redo stack would be state to maintain for no new capability.
+
+  **Undo of transaction edits and deletes: cut.** That needs soft-delete, which
+  means a schema change plus a deleted-row filter on every read and every report,
+  for an action that already carries a counted confirm. Revisit if a real
+  mis-delete ever costs something.
+
+  **The two-editor hazard, and the guard.** Undo puts *old* figures back, so if
+  the other person has touched the same envelope since, a naive undo silently
+  stomps them. `core.js undoStomped(expect, assigns)` compares what we wrote
+  against what is there now and returns the rows that moved; a non-empty result
+  refuses the undo and says so, touching nothing. It compares in **cents**, not
+  raw values, because PostgREST returns numerics as strings (`"40.00"`) and a
+  plain `!==` would declare every row stomped and make undo permanently useless.
+  That string/number case is one of the selftests.
+- Keyboard shortcuts (S). DONE. `n` new transaction, `/` search, `[` / `]` month,
+  `a` auto-assign, `u` undo, `?` the list. Single letters with no modifiers, which
+  is only safe because the handler bails on a focused field, an open dialog, or
+  any modifier combination — so browser and OS shortcuts are never shadowed. `[`
+  and `]` step months rather than the arrow keys, which belong to scrolling. The
+  sheet is built from the same `SHORTCUTS` array the handler reads, so the keys
+  and their documentation cannot drift apart.
+- PWA manifest + icons (S). DONE. `manifest.json` + 192/512/maskable PNGs and an
+  apple-touch-icon, generated from one SVG source (petrol tile, cream allocation
+  bars echoing the spending breakdown). **Deliberately still no service worker** —
+  every figure here is money, and a stale cached balance is worse than a spinner.
+  The `apple-mobile-web-app-*` metas were already in place from the redesign, so
+  this was the missing half of an iPhone install. First icon drawn was an
+  envelope, matching the model's name; it read as Mail on a home screen and was
+  replaced.
+- First-run envelope explainer (S). DONE. Three numbered steps (money arrives →
+  you assign it → you spend from a category), shown once on a budget that has no
+  categories yet, dismissal remembered per device in `budget.seen-intro`, and
+  re-openable from the overflow menu as "How this works". An existing budget never
+  sees it. This is the surface that matters for onboarding the second person.
 
 ### Parked (unscheduled, revisit on real demand)
 
@@ -909,7 +949,10 @@ Phase 1, then 2, then 3, then 4: finish the core, then the visible Monarch
 win, then automation, then net worth. **All four shipped and deployed by
 2026-07-21**, migrations v7/v8/v9 confirmed run by REST probe. Phase 6 was then
 pulled forward and built, because Phase 5 stays gated on the first real bank
-export showing up. Phase 7 is the remaining unblocked filler. Everything honors the locked decisions: static files, no build step,
+export showing up. **Phase 7 followed on 2026-07-21, so Phase 5 is now the only
+roadmap item left** — and it stays gated until a real bank export exists. The
+honest next move is not another phase: it is using this with real money for a
+few weeks and letting that decide what gets built. Everything honors the locked decisions: static files, no build step,
 `kind` column never signed amounts, integer cents, RLS as the only gate, no
 Plaid.
 

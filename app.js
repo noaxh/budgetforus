@@ -4,7 +4,7 @@ import {
   prevMonthStart, sumSpentInRange, spendingBreakdown, cashFlow, txnMatches, rollup, recurringOccurrences,
   splitParentIds, distributeSplit, evalAmount, ageOfMoney,
   matchRule, lastCategoryFor, retroApply,
-  netWorthAt, netWorthSeries
+  netWorthAt, netWorthSeries, undoStomped
 } from './core.js'
 
 // Safe to commit and ship to the browser: the publishable key is public by
@@ -18,7 +18,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // txns is the month on screen (the list). history is everything up to the end of
 // it (the rollup) -- two views of one fetch, because Available rolls forward.
-const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], rules: [], accounts: [], snapshots: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null }
+const state = { budgets: [], budgetId: null, month: new Date(), cats: [], txns: [], history: [], assigns: [], recurring: [], rules: [], accounts: [], snapshots: [], snoozed: new Set(), editing: null, splitRows: null, selMode: false, sel: new Set(), tab: 'budget', closedGroups: new Set(), txnFilter: null, txnSearch: '', view: localStorage.getItem('budget.view') || 'all', moveCat: null, undo: null }
 const $ = id => document.getElementById(id)
 
 // One rollup for the whole app, snooze-aware. Every screen and action reads the
@@ -283,6 +283,17 @@ function render() {
   if (pend.length) {
     $('rec-banner-text').textContent =
       `${pend.length} recurring ${pend.length === 1 ? 'item' : 'items'} not added for ${monthLabel(state.month)}.`
+  }
+
+  // Undo banner: only for the month the change landed in, so it can't offer to
+  // rewrite a month you've since navigated away from.
+  const u = state.undo
+  const showUndo = !!u && u.month === monthStart(state.month)
+  $('undo-banner').hidden = !showUndo
+  if (showUndo) {
+    $('undo-banner-text').textContent = u.n === 1
+      ? 'Assignment changed.'
+      : `${u.n} assignments changed.`
   }
 
   $('cat-count').textContent = liveCats().length ? `${liveCats().length}` : ''
@@ -605,7 +616,23 @@ async function refresh() {
   await loadMonth()
   if (await maybeAutoApply()) await loadMonth()  // reload so the fresh rows show
   render()
+  maybeIntro()
 }
+
+// ---- first-run explainer (Phase 7). The envelope model is the thing people
+// bounce off, so say it once before the empty plan rather than letting someone
+// guess what Ready to Assign wants from them. Fires only on a budget with no
+// categories yet — an existing budget means you already know — and remembers the
+// dismissal per device. Re-openable from the overflow menu.
+const INTRO_KEY = 'budget.seen-intro'
+function maybeIntro() {
+  if (localStorage.getItem(INTRO_KEY)) return
+  if (!state.budgetId || state.cats.length) return
+  if (document.querySelector('dialog[open]')) return
+  $('intro-dialog').showModal()
+}
+$('intro-done').onclick = () => { localStorage.setItem(INTRO_KEY, '1'); $('intro-dialog').close() }
+$('show-intro').onclick = () => $('intro-dialog').showModal()
 
 // ---------------------------------------------------------------- auth
 
@@ -670,6 +697,43 @@ document.querySelector('.tabbar').onclick = e => {
   if (b) switchTab(b.dataset.tab)
 }
 window.addEventListener('hashchange', () => switchTab(location.hash.slice(1)))
+
+// ---- keyboard shortcuts (Phase 7). Desktop convenience; nothing here is the only
+// way to reach a feature, so a keyboard that never fires costs nothing.
+//
+// Single letters, no modifiers, which is only safe because we bail on anything
+// that means "the user is typing": a focused field, an open sheet (dialogs own the
+// keyboard and close on Escape natively), or any modifier combination, so browser
+// and OS shortcuts are never shadowed. `[` and `]` step months rather than the
+// arrow keys, which belong to scrolling and to the focused control.
+const SHORTCUTS = [
+  ['n', 'New transaction'], ['/', 'Search transactions'], ['[', 'Previous month'],
+  [']', 'Next month'], ['a', 'Auto-assign'], ['u', 'Undo last assignment'], ['?', 'This list']
+]
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return
+  if ($('app').hidden) return                                   // logged out
+  if (document.querySelector('dialog[open]')) return            // the sheet owns the keys
+  const t = e.target
+  if (t.matches?.('input, textarea, select') || t.isContentEditable) return
+
+  const act = {
+    n: () => openTxn(null),
+    '/': () => { switchTab('accounts'); $('txn-search').focus() },
+    '[': () => goMonth(-1),
+    ']': () => goMonth(1),
+    a: () => liveCats().length && openAutoAssign(),
+    u: () => takeUndo(),
+    '?': () => $('keys-dialog').showModal()
+  }[e.key]
+  if (!act) return
+  e.preventDefault()
+  act()
+})
+$('keys-list').innerHTML = SHORTCUTS.map(([k, label]) =>
+  `<div class="keys-row"><kbd>${esc(k)}</kbd><span class="small">${esc(label)}</span></div>`).join('')
+$('keys-done').onclick = () => $('keys-dialog').close()
+$('show-keys').onclick = () => $('keys-dialog').showModal()
 
 // ---- home dashboard: card taps and the Customize sheet.
 // A card tap routes to its screen; an alert may also set a focused view first so
@@ -743,7 +807,7 @@ $('view-bar').onclick = e => {
 $('accounts').onclick = async e => {
   const b = e.target.closest('[data-acct]')
   if (!b || b.dataset.acct === state.budgetId) return
-  state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''
+  state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''; state.undo = null
   state.budgetId = b.dataset.acct
   await refresh()   // re-renders the switcher label; no <select>.value to sync now
 }
@@ -751,7 +815,9 @@ $('accounts').onclick = async e => {
 // ---------------------------------------------------------------- events
 
 // Leaving the month clears any selection: its ids belong to the month you left.
-const goMonth = delta => { if (state.selMode) { state.selMode = false; state.sel.clear() } state.txnFilter = null; state.txnSearch = ''; state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh() }
+// state.undo is dropped on a month change: the banner offers to put figures back
+// into a month you can no longer see, which is worse than not offering at all.
+const goMonth = delta => { if (state.selMode) { state.selMode = false; state.sel.clear() } state.txnFilter = null; state.txnSearch = ''; state.undo = null; state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh() }
 $('prev').onclick = () => goMonth(-1)
 $('next').onclick = () => goMonth(1)
 
@@ -795,6 +861,12 @@ $('menu-dialog').onclick = e => {
 // when we ship, which is when this file changes anyway. Add a "new since you last
 // looked" dot (localStorage last-seen date) if discoverability ever needs it.
 const CHANGELOG = [
+  ['2026-07-21', 'Install it, and undo things', [
+    'Add Budget to your home screen — it opens without browser chrome, like an app. (It still needs a connection: your money should never be a stale cached number.)',
+    'Changed an assignment by mistake? An Undo appears above the plan. If the other person has touched that category since, it tells you instead of overwriting them.',
+    'Keyboard shortcuts on a computer — press ? to see them.',
+    'A short “how this works” explainer for the envelope method, in the menu any time.'
+  ]],
   ['2026-07-21', 'Tidying your categories', [
     'Put categories in the order you want them with the arrows in Categories.',
     'Archive a category you’re done with: it leaves the plan and the pickers, but its past spending stays in your history and your reports. Deleting still doesn’t — archive is the safe way to retire one.',
@@ -855,7 +927,7 @@ function renderBudgetList() {
 }
 async function switchTo(id) {
   if (id === state.budgetId) return
-  state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''
+  state.selMode = false; state.sel.clear(); state.txnFilter = null; state.txnSearch = ''; state.undo = null
   state.budgetId = id
   await refresh()
 }
@@ -1036,7 +1108,9 @@ $('reflect-export').onclick = () => {
 
 // Upsert, not update: the row for (category, month) doesn't exist until someone
 // assigns something, and "assigned nothing" and "never assigned" spend the same.
-async function assign(rows) {
+// `undoable: false` stops an undo from stacking its own undo, which would turn the
+// banner into a permanent toggle. One level, this session only — see takeUndo().
+async function assign(rows, { undoable = true } = {}) {
   if (!rows.length) return
   // Money Moves: record from -> to for every row that actually changes, reading
   // the "from" out of the assignments already in state. ponytail: state can be a
@@ -1052,7 +1126,39 @@ async function assign(rows) {
   const { error } = await sb.from('assignments').upsert(rows, { onConflict: 'category_id,month' })
   if (error) return fail(error)
   if (moves.length) await sb.from('money_moves').insert(moves)  // trail, not a gate
+  // The inverse of what just happened, plus what we expect to find still there.
+  // Auto-assign and a move both come through here, so one Undo covers a whole
+  // batch of rows, not just a single typed figure.
+  if (undoable && moves.length) {
+    state.undo = {
+      rows: moves.map(m => ({ budget_id: m.budget_id, category_id: m.category_id, month: m.month, amount: m.from_amount })),
+      expect: moves.map(m => [m.category_id, m.month, m.to_amount]),
+      month: moves[0].month,
+      n: moves.length
+    }
+  }
   refresh()
+}
+
+// Undo the last assignment change. Deliberately NOT a general undo stack: one
+// level, this session only, assignments only. Transaction edits and deletes are
+// out — undoing those needs soft-delete, which means a schema change and a
+// deleted-row filter on every read, for an action that already has a confirm.
+//
+// Two people share a budget, so before putting the old figures back we check the
+// new ones are still there. If the other person has touched the same envelope
+// since, undoing would silently stomp them; refuse and say so instead.
+async function takeUndo() {
+  const u = state.undo
+  if (!u) return
+  const stomped = undoStomped(u.expect, state.assigns)
+  if (stomped.length) {
+    state.undo = null
+    render()
+    return alert(`Can't undo — ${stomped.length === u.expect.length ? 'that assignment has' : 'one of those assignments has'} changed since. Nothing was touched.`)
+  }
+  state.undo = null
+  await assign(u.rows, { undoable: false })
 }
 
 $('categories').onchange = e => {
@@ -1593,6 +1699,8 @@ $('rec-list').onclick = async e => {
   if (error) return fail(error)
   await loadMonth(); renderRec(); render()
 }
+
+$('undo-assign').onclick = () => takeUndo()
 
 $('apply-rec').onclick = async () => {
   const rows = recurringRows(pendingRecurring())

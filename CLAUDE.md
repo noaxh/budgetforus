@@ -63,8 +63,18 @@ Remaining phases, in order:
      merge (bulk-recategorize + delete does it in two steps), copy/archive budget and
      Fresh Start (two people, one budget). Future-month assigning needed no work —
      `goMonth` never clamped and `assign` has no month guard.
-7. **Productivity + QoL:** undo/redo, keyboard shortcuts, PWA manifest, first-run
-   envelope explainer.
+7. ~~**Productivity + QoL.**~~ **Built 2026-07-21, no migration.** Undo built NARROW —
+   one level, this session, assignments only, guarded by `core.js undoStomped()` which
+   compares in cents (PostgREST returns numerics as strings, so a raw `!==` would call
+   every row stomped) and refuses rather than stomping a partner's edit. Redo cut (retype
+   it); undo of transaction edits/deletes cut (needs soft-delete + a filter on every read).
+   Keyboard shortcuts `n / [ ] a u ?`, ignored while typing or with a sheet open. PWA
+   manifest + generated icons, still **no service worker** — a stale cached balance is
+   worse than a spinner. First-run explainer, once per device, re-openable from the menu.
+
+**With Phase 7 done, Phase 5 (file import) is the only roadmap item left, and it is gated
+on a real bank export existing.** Don't invent more phases — the standing recommendation
+below (use it for a week with real data) is the actual next step.
 
 Parked (build on real demand): loan calculator, real payees table, richer target kinds,
 realtime sync, offline. Settle-up / who-owes-who stays out unless asked (the shared budget

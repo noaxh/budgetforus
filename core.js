@@ -319,6 +319,21 @@ export function evalAmount(str) {
 // amount-weighted within the expense). AoM is the mean age of the last `sample`
 // expenses. Split parents are skipped (their children are the real outflows).
 // ponytail: whole-day resolution, weighted within an expense but a plain mean
+// Undo's compare-and-swap (Phase 7). Two people share a budget, so before putting
+// old figures back we check the ones we wrote are still there; if the other person
+// has since touched the same envelope, undoing would silently stomp them.
+//
+// `expect` is [categoryId, month, amount] triples of what we last wrote. Returns
+// the triples that no longer match, so an empty array means undo is safe. Amounts
+// are compared in cents, because the DB hands back numerics as strings ("40.00")
+// and a raw !== would call every single row stomped. Pure + selftested — this is
+// the only part of undo that can be quietly wrong.
+export function undoStomped(expect, assigns) {
+  const now = (catId, month) =>
+    cents(assigns.find(a => a.category_id === catId && a.month === month)?.amount ?? 0)
+  return expect.filter(([catId, month, amount]) => now(catId, month) !== cents(amount))
+}
+
 // across them, and it ignores the portion of an expense not covered by banked
 // income rather than inventing an age for it.
 export function ageOfMoney(history, sample = 10) {
@@ -675,6 +690,18 @@ if (location.search.includes('selftest')) {
     'a txn in an unknown category is dropped, not folded into ready to assign')
   eq(rollup([...CATS, { id: 'archived' }], A300, ORPHAN, '2026-07-01').cats.get('archived').available, -40000,
     'the same txn lands in its envelope once the category is in the list')
+
+  // Phase 7 (undo compare-and-swap). The DB returns numerics as strings, so the
+  // string/number case is the one that would quietly break undo for everybody by
+  // declaring every row stomped.
+  const UEXP = [['g', '2026-07-01', 300], ['f', '2026-07-01', 50]]
+  const at = (gAmt, fAmt) => [{ category_id: 'g', month: '2026-07-01', amount: gAmt },
+                              { category_id: 'f', month: '2026-07-01', amount: fAmt }]
+  eq(undoStomped(UEXP, at(300, 50)).length, 0, 'undo is safe when nothing moved since')
+  eq(undoStomped(UEXP, at('300.00', '50.00')).length, 0, 'numeric strings from the DB still compare equal')
+  eq(undoStomped(UEXP, at(320, 50)).length, 1, 'a partner edit since is caught')
+  eq(undoStomped(UEXP, at(320, 50))[0][0], 'g', 'and it names the row that moved')
+  eq(undoStomped(UEXP, []).length, 2, 'rows that vanished count as changed')
 
   console.log('selftest ok')
 }

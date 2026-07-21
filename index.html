@@ -7,6 +7,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Budget">
 <meta name="theme-color" content="#F5F2EA">
+<!-- Installable, but deliberately NOT offline: no service worker. Every figure in
+     here is money, and a stale cached balance is worse than a spinner. -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png" type="image/png">
 <title>Budget</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -78,6 +83,13 @@
       <div class="banner" id="rec-banner" hidden>
         <span class="small" id="rec-banner-text"></span>
         <button class="btn" id="apply-rec">Add them</button>
+      </div>
+
+      <!-- Undo the last assignment change (Phase 7). One level, this session only;
+           it clears on a month or budget change. -->
+      <div class="banner" id="undo-banner" hidden>
+        <span class="small" id="undo-banner-text"></span>
+        <button class="btn btn-quiet" id="undo-assign">Undo</button>
       </div>
 
       <div class="budget-grid">
@@ -585,6 +597,14 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       <span>Rename budget</span>
     </button>
+    <button class="menu-item" id="show-intro">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <span>How this works</span>
+    </button>
+    <button class="menu-item" id="show-keys">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>
+      <span>Keyboard shortcuts</span>
+    </button>
     <button class="menu-item" id="show-changelog">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h8a2 2 0 0 1 2 2v15l-3-2-3 2-3-2-3 2V5a2 2 0 0 1 2-2Z"/><path d="M9 8h6M9 12h4"/></svg>
       <span>What&rsquo;s new</span>
@@ -593,6 +613,37 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
       <span>Sign out</span>
     </button>
+  </div>
+</dialog>
+
+<!-- Keyboard shortcuts (Phase 7). Desktop only in practice; the list is built from
+     the SHORTCUTS array in app.js so the keys and this sheet can't drift apart. -->
+<dialog id="keys-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Keyboard shortcuts</h2></div>
+    <div id="keys-list"></div>
+    <p class="small muted" style="margin-top:14px">Shortcuts are ignored while you&rsquo;re typing or a sheet is open.</p>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="keys-done">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- First-run explainer (Phase 7). The envelope model is where people bounce off,
+     so it gets said once, plainly, before the empty plan. Opens itself on a first
+     run and stays reachable from the overflow menu afterwards. -->
+<dialog id="intro-dialog">
+  <div class="sheet">
+    <div class="sheet-head"><h2>Give every dollar a job</h2></div>
+    <ol class="intro-list">
+      <li><b>Money arrives.</b> Add your income as a transaction. It lands in <b>Ready to Assign</b> at the top.</li>
+      <li><b>You assign it.</b> Put that money into categories — rent, groceries, a trip — until Ready to Assign reads zero. You&rsquo;re budgeting money you already have, not guessing at next month.</li>
+      <li><b>You spend from a category.</b> Its Available goes down. Green means funded, amber means it still needs money, red means you overspent and should cover it from somewhere else.</li>
+    </ol>
+    <p class="small muted">Overspent something? Tap its Available and move money in from another category. That&rsquo;s the whole method — the rest of the app is convenience on top.</p>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="intro-done">Got it</button>
+    </div>
   </div>
 </dialog>
 

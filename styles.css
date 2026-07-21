@@ -871,6 +871,22 @@ dialog[open]::backdrop {
 
 /* The category note in the move sheet: context above the amount, not a control. */
 .move-note { margin: 0 0 var(--s2); }
+
+/* ---- keyboard shortcuts + first-run explainer (Phase 7) ---------------------
+   Two read-only sheets. The shortcut rows are a key/label pair; <kbd> gets the
+   only monospace in the app, which is the point — it reads as a key, not prose. */
+.keys-row { display: flex; align-items: center; gap: var(--s3); padding: 10px 0; }
+.keys-row + .keys-row { border-top: 1px solid var(--hairline); }
+.keys-row kbd {
+  font: 600 13px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  min-width: 30px; padding: 7px 8px; text-align: center;
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--hairline); border-radius: var(--r-chip, 7px);
+  color: var(--ink);
+}
+.intro-list { margin: 0 0 var(--s3); padding-left: 1.2em; }
+.intro-list li { margin-bottom: var(--s3); line-height: 1.5; }
+.intro-list li:last-child { margin-bottom: 0; }
 .rec-edit { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
 .rec-edit + .rec-edit { border-top: 1px solid var(--hairline); }
 .rec-edit .body { flex: 1; min-width: 0; }
@@ -884,7 +900,7 @@ dialog[open]::backdrop {
    Rule rows reuse .rec-edit; the flag dot inline sits in the .small line. The
    reorder buttons mirror the Home-customize move controls. */
 .rule-move { display: flex; gap: var(--s1); flex: none; }
-.rule-move .btn-quiet { min-width: 40px; min-height: 40px; padding: 0; }
+.rule-move .btn-quiet { min-width: 44px; min-height: 44px; padding: 0; }
 .rule-move .btn-quiet:disabled { opacity: 0.35; }
 .rec-edit .flag-dot { display: inline-block; width: 9px; height: 9px; vertical-align: baseline; }
 
