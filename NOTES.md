@@ -926,15 +926,32 @@ Noah, from screenshots on a real phone: *"the most important part is the mobile
 design since this will be almost exclusively used on mobile view."* Taken ahead of
 Phases 8–10.
 
-- **The dock appeared to change height between tabs.** It never did — the tabbar
-  is a constant 58px. The net-worth range `<select>` was `flex: none`, so it
-  claimed its longest option ("Last 24 months") in full and overflowed a 375px
-  phone by 15px. **An overflowing document grows the layout viewport, so a fixed
-  element's `bottom: 0` resolves below the visible area.** That is the whole bug:
-  a 15px horizontal overflow on one screen moved the dock on that screen. Worth
-  remembering as a class — on a phone, *any* horizontal overflow drags fixed
-  furniture with it. Verified after: document width == viewport width on all five
-  tabs, dock at exactly the viewport edge on all five.
+- **The dock appeared to change height between tabs — fixed in two passes, and the
+  first one was incomplete.** The tabbar is a constant 58px; it never changed size.
+  - *Pass 1:* the net-worth range `<select>` was `flex: none`, so it claimed its
+    longest option ("Last 24 months") and overflowed a 375px phone by 15px. **An
+    overflowing document grows the layout viewport, so a fixed element's
+    `bottom: 0` resolves below the visible area.** On a phone, *any* horizontal
+    overflow drags fixed furniture with it. Necessary, but it only removed one
+    trigger.
+  - *Pass 2 (the actual fix):* Noah reported it still shifting on device. A
+    `position: fixed` bottom bar is positioned against the **layout** viewport,
+    which on iOS is not what you can see — as the URL bar collapses and expands
+    the visible area moves underneath it. Screens here differ enormously in length
+    (Home ~1120px, Budget ~1800px), so *switching tabs* changes scroll and toolbar
+    state, which is exactly the home→budget case. **So the dock stopped being
+    fixed at all:** `#app` is a `100dvh` flex column, `main` is the scroller, and
+    the tabbar is the last row in normal flow. The document no longer scrolls on
+    any tab, so there is nothing left for browser chrome to push around. Verified:
+    dock at 754 at rest, 754 with the list scrolled 990px down, 754 after
+    switching tabs and back. Tab switches also reset the scroller to the top.
+  - **Tradeoff, stated rather than hidden:** because the document never scrolls,
+    mobile Safari keeps its URL bar expanded instead of collapsing it. The dock
+    stays put at the cost of the chrome never getting out of the way. Installed to
+    the home screen (Phase 7 PWA) there is no chrome, so the cost disappears — one
+    more reason to install it.
+  - The wide layout explicitly **undoes** the shell (fixed sidebar, normal
+    document scroll, sticky appbar); verified at 1280×800.
 - **Budget rows collided.** `.cat-row` spanned the Available pill down both grid
   rows (`"name avail" "meta avail"`), so a wide pill — `$0.00 / Needs $250.00` on
   an underfunded target — squeezed the meta column until the Activity figure ran
