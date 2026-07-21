@@ -1003,6 +1003,90 @@ expense — otherwise you are back to who-owes-whom, which decision 3 cut.
 **Order:** 8.1, 8.2, 8.3, 8.4. One migration, one new pure function, the rest is
 presentation over data that already exists.
 
+### Phase 9: charts and the visual language (planned 2026-07-21)
+
+Noah asked for graphs and circle/pie charts, "like Monarch and YNAB". Today the
+app has share-of-total bars (spending breakdown), a bar trend (net worth), and a
+summary line (income vs expense). No true charts, no categorical palette.
+
+**Two findings changed the design, and both are computed, not opinion.**
+
+**1. The palette is semantic, so the hue budget is tiny.** Green, amber and red
+already *mean* funded / underfunded / overspent in this app. Status colours are
+reserved and must never carry a series, or a wedge that happens to be red reads
+as "overspent". That removes a third of the hue wheel before we start.
+
+**2. A donut carries fewer categories than a bar list does.** Bars are compared
+against their *neighbours*; donut wedges are compared against *every other
+wedge*. Running the palette validator in adjacent mode versus all-pairs mode on
+the cream surface (`#F5F2EA`) gives two different ceilings:
+
+| Use | Validated slots | Palette |
+|---|---|---|
+| Bars, lines, stacked (adjacent comparison) | **5** | `#0095A8` cyan, `#C2185B` magenta, `#2a78d6` blue, `#A64B2A` rust, `#5B3FBF` violet |
+| Donut (all-pairs comparison) | **3** + "Other" gray | `#0095A8`, `#C2185B`, `#5B3FBF` |
+
+All five checks pass for each set in its own mode (lightness band, chroma floor,
+CVD separation, normal-vision floor, contrast vs surface). A 4th donut hue was
+attempted six ways and failed every time: with green/amber/red reserved, what is
+left is a contiguous cool arc, and blue sits between cyan and violet, so any
+four-hue donut set puts two neighbours below the ΔE 15 normal-vision floor.
+
+**Also computed: the brand petrol `#0C5F66` cannot be a series colour.** Chroma
+0.072 on cream, below the 0.1 floor — it reads gray in a chart. Petrol stays UI
+chrome (buttons, focus rings, the meter fill); series get their own hues.
+
+**What NOT to build, despite the ask.** Two of the three places a pie feels
+natural are two-slice pies, which is a named anti-pattern:
+
+- **Goal progress (saved vs target) → a progress *ring*, which is a meter, not a
+  pie.** A single ratio against a limit is a meter: one hue filling a neutral
+  track. Rendered as an arc it still looks like the circular graphic Noah wants,
+  and it stays honest. Brand petrol fills it — this is the one place petrol works,
+  because a meter encodes magnitude by *length*, not identity by hue.
+- **Contribution split (you vs friend) → one stacked bar with two direct
+  labels.** Two people is two segments; a two-slice pie is strictly worse than a
+  bar at showing "who put in more, and by how much".
+- **Spending breakdown → this is the one that legitimately earns a donut.**
+  Part-to-whole, at a glance, ≤ 6 segments. Top 3 categories + "Other".
+
+**The chart inventory, form chosen by job:**
+
+| Surface | Job | Form | Colour job |
+|---|---|---|---|
+| Spending breakdown (Reflect) | part-to-whole at a glance | **donut**, top 3 + Other, with the existing bar list kept underneath as the detail/table view | categorical (3) |
+| Trip goal (Phase 8) | single ratio vs a limit | **progress ring (meter)** | brand petrol on neutral track |
+| Contributions (Phase 8) | part-to-whole, 2 parts | **one stacked bar**, direct-labelled | categorical (2) |
+| Net worth | trend over time | **line** with a hover crosshair (upgrade from the current bars) | single hue |
+| Income vs expense | above/below a baseline | **diverging bar** centred on zero | diverging pair |
+| Home cards | a current value + its trend | **stat tile with sparkline** | single hue |
+
+**Implementation: hand-rolled inline SVG, no charting library.** A donut is one
+`<circle>` with `stroke-dasharray`; a ring meter is the same circle; a line is one
+`<polyline>`; the stacked and diverging bars are the `<div>`s already in the kit.
+A library would be ~200KB and a build step to avoid writing about forty lines of
+SVG, against a locked "static files, no build step, no framework" decision.
+
+**Non-negotiables carried from the project's own accessibility rules:**
+
+- Identity is never colour-alone: a legend whenever there are ≥ 2 series, plus
+  direct labels at ≤ 4 series. The existing bar list doubles as the table view.
+- Text wears the ink tokens, never the series colour. A coloured mark sits *beside*
+  the label and carries the identity.
+- Every chart respects `body.amounts-hidden` — the labels blur with everything
+  else. (Wedge *geometry* still leaks proportions; that is acceptable, since
+  hide-amounts exists to cover figures on a train, not to encrypt the budget.)
+- Hover tooltips on donut wedges and line points; `prefers-reduced-motion` kills
+  the draw-on animation, matching the rest of the app.
+- The palette above is validated **for the cream light surface only**. Dark mode
+  needs its own steps from the same hues, re-validated against the dark surface —
+  never an automatic flip.
+
+**Order:** the donut and the ring first (they serve Phase 8's trip goal and the
+report people actually look at), then the net-worth line, then income vs expense,
+then sparklines. Sequenced after Phase 8's `contributions()` exists, since the
+contribution bar depends on it.
+
 ### Parked (unscheduled, revisit on real demand)
 
 - Loan/debt calculator. Self-contained client math; build it the day a real
